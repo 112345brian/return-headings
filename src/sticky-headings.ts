@@ -1,61 +1,73 @@
 /**
  * Sticky heading bar — VS Code sticky-scroll style.
  *
- * Mirrors the core behaviour of VS Code's sticky scroll as closely as this
- * plugin's divergent semantics allow:
+ * Two implementations share the same DOM/CSS:
  *
- *  • The bar is injected as `position: absolute; top: 0` directly into
- *    `.cm-editor` (via `ViewPlugin`), so editor content scrolls UNDERNEATH
- *    it rather than being pushed below it.  This is the same DOM strategy
- *    VS Code uses and is what gives the natural "peek" effect: as the next
- *    heading scrolls toward the top of the viewport you can see it
- *    approaching in the content behind the bar.  No explicit animation code
- *    is needed — the scrolling content itself provides the transition.
+ *  **Editor mode** (`buildStickyBarExtension`):
+ *   CM6 `ViewPlugin` that appends `position:absolute` into `.cm-editor` so
+ *   content scrolls underneath.  Boundaries are precomputed on `docChanged`
+ *   and searched with binary search on each scroll frame (O(log n)).
  *
- *  • Each context level is rendered as a separate line showing the raw
- *    heading source text with its `#` prefix (`## Section Name`), matching
- *    VS Code's "exact source text with editor styling" approach.
+ *  **Reading View** (`ReadingViewStickyBar`):
+ *   DOM-based class injected into `.markdown-preview-view`.  Uses
+ *   `getBoundingClientRect()` on rendered heading elements to build the
+ *   context stack without a source-to-render line-number mapping.  The
+ *   virtual heading stack (return markers) is not applied here — Reading View
+ *   shows raw headings only — but the visual presentation is identical.
  *
- *  • The context is derived from `findContextAtBoundaries()` which resolves
- *    heading-return markers, so the bar reflects the *virtual* heading stack
- *    rather than the raw `metadataCache.headings` list.
- *
- * **Where we diverge from VS Code intentionally:**
- *  • Headings are styled with Obsidian's CSS variables (`--h1-color` etc.)
- *    rather than with CM6 token decorations, so they look consistent with
- *    the rest of the note in both Live Preview and source mode.
- *  • Return-marker context is virtual; VS Code has no equivalent.
- *
- * Adapted from the sticky-heading concept in obsidian-sticky-headings
- * (MIT, zhouhua): https://github.com/zhouhua/obsidian-sticky-headings
+ * Adapted from obsidian-sticky-headings (MIT, zhouhua):
+ *   https://github.com/zhouhua/obsidian-sticky-headings
  */
 
 import { EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view';
+import type { MarkdownView } from 'obsidian';
 import type { ReturnHeadingsSettings } from './settings';
 import {
 	type HeadingBoundary,
 	type HeadingEntry,
 	computeHeadingBoundaries,
 	findContextAtBoundaries,
-	findNextBoundaryLine,
 	getFirstVisibleLineNum,
 } from './utils';
 
 export type { HeadingEntry };
 
-// Maximum context lines shown, matching VS Code's default of 5.
-const MAX_STICKY_LINES = 5;
+const MAX_LINES = 5;
 
-// ── Bar renderer ─────────────────────────────────────────────────────────────
+// ── Shared DOM builder ───────────────────────────────────────────────────────
 
 /**
- * Rebuilds (or updates) the sticky bar DOM for the given scroll position.
- *
- * Skips a full DOM rebuild when the context lines haven't changed (only the
- * scroll position moved within the same context), avoiding layout thrash on
- * every pixel of scrolling.
+ * Clears `bar` and rebuilds one `div.rh-sticky-line` per context entry.
+ * Each line shows `## Heading text` with level-appropriate styling.
+ * Clicking a line calls `onJump(entry)`.
  */
-function renderBar(
+function buildLines(
+	bar: HTMLElement,
+	context: { level: number; text: string }[],
+	onJump: (idx: number) => void,
+): void {
+	bar.empty();
+	const visible = context.length > MAX_LINES ? context.slice(-MAX_LINES) : context;
+
+	for (let i = 0; i < visible.length; i++) {
+		const entry = visible[i]!;
+		const isLast = i === visible.length - 1;
+
+		const line = bar.createEl('div', {
+			cls: `rh-sticky-line rh-sticky-h${entry.level}${isLast ? ' rh-sticky-line-last' : ''}`,
+		});
+
+		line.createEl('span', { text: '#'.repeat(entry.level) + ' ', cls: 'rh-sticky-prefix' });
+		line.createEl('span', { text: entry.text, cls: 'rh-sticky-text' });
+
+		const idx = i;
+		line.addEventListener('click', () => onJump(idx));
+	}
+}
+
+// ── Editor-mode extension ────────────────────────────────────────────────────
+
+function renderEditorBar(
 	bar: HTMLElement,
 	view: EditorView,
 	boundaries: HeadingBoundary[],
@@ -67,7 +79,6 @@ function renderBar(
 	}
 
 	const lineNum = getFirstVisibleLineNum(view);
-	// Hide at top of document — no context to summarise yet.
 	if (lineNum === null || lineNum < 1 || view.scrollDOM.scrollTop < 1) {
 		bar.style.display = 'none';
 		return;
@@ -79,84 +90,31 @@ function renderBar(
 		return;
 	}
 
-	// Clamp to MAX_STICKY_LINES showing the deepest (most specific) levels.
-	const visible = context.length > MAX_STICKY_LINES
-		? context.slice(context.length - MAX_STICKY_LINES)
-		: context;
+	const contextKey = context.map(e => e.line).join(',');
+	if (bar.dataset.contextKey === contextKey) return;
+	bar.dataset.contextKey = contextKey;
 
-	// Build a cheap key to detect whether the displayed context has changed.
-	const contextKey = visible.map(e => e.line).join(',');
-
-	if (bar.dataset.contextKey !== contextKey) {
-		bar.dataset.contextKey = contextKey;
-		buildLines(bar, visible, view);
-	}
+	buildLines(bar, context, idx => {
+		const visible = context.length > MAX_LINES ? context.slice(-MAX_LINES) : context;
+		const entry = visible[idx];
+		if (!entry) return;
+		const cmLine = view.state.doc.line(
+			Math.max(1, Math.min(entry.line + 1, view.state.doc.lines)),
+		);
+		view.dispatch({
+			selection: { anchor: cmLine.from },
+			effects: EditorView.scrollIntoView(cmLine.from, { y: 'start', yMargin: 0 }),
+		});
+		view.focus();
+	});
 
 	bar.style.display = '';
 }
 
 /**
- * Clears and rebuilds all sticky line elements.
- * Each line shows `## Heading text` with level-appropriate styling, matching
- * VS Code's "exact source line" approach.
- */
-function buildLines(
-	bar: HTMLElement,
-	context: HeadingEntry[],
-	view: EditorView,
-): void {
-	bar.empty();
-
-	for (let i = 0; i < context.length; i++) {
-		const entry = context[i]!;
-		const isLast = i === context.length - 1;
-
-		const line = bar.createEl('div', {
-			cls: `rh-sticky-line rh-sticky-h${entry.level}${isLast ? ' rh-sticky-line-last' : ''}`,
-		});
-
-		// `##`-style prefix, muted — matching VS Code's syntax-coloured hash marks.
-		line.createEl('span', {
-			text: '#'.repeat(entry.level) + ' ', // non-breaking space after hashes
-			cls: 'rh-sticky-prefix',
-		});
-
-		// Heading text with level-matched colour and weight.
-		line.createEl('span', {
-			text: entry.text,
-			cls: 'rh-sticky-text',
-		});
-
-		// Click jumps to this heading in the editor.
-		const targetLine = entry.line;
-		line.addEventListener('click', () => {
-			const cmLine = view.state.doc.line(
-				Math.max(1, Math.min(targetLine + 1, view.state.doc.lines)),
-			);
-			view.dispatch({
-				selection: { anchor: cmLine.from },
-				effects: EditorView.scrollIntoView(cmLine.from, { y: 'start', yMargin: 0 }),
-			});
-			view.focus();
-		});
-	}
-}
-
-// ── Extension ────────────────────────────────────────────────────────────────
-
-/**
- * Builds the CM6 `ViewPlugin` that renders the sticky heading bar.
- *
- * The plugin appends a `div.rh-sticky-bar` directly to `view.dom`
- * (`.cm-editor`) with `position: absolute; top: 0`.  Because `.cm-editor`
- * has `position: relative`, the bar floats over the scroller content rather
- * than pushing it down — this is the VS Code approach and is what produces
- * the natural "peek" transition without any animation code.
- *
- * A scroll listener on `view.scrollDOM` drives real-time updates; the CM6
- * `update` callback handles document changes and geometry changes.
- *
- * @param getSettings - Accessor for current plugin settings.
+ * Builds the CM6 `ViewPlugin` for editor mode (source / Live Preview).
+ * The bar is injected as `position:absolute; top:0` into `view.dom`
+ * (`.cm-editor`), overlaying the scroller so content passes beneath it.
  */
 export function buildStickyBarExtension(getSettings: () => ReturnHeadingsSettings) {
 	return ViewPlugin.fromClass(
@@ -167,35 +125,32 @@ export function buildStickyBarExtension(getSettings: () => ReturnHeadingsSetting
 			private readonly scrollHandler: () => void;
 
 			constructor(private readonly view: EditorView) {
-				// Inject bar into .cm-editor so it overlays the scroller content.
 				this.bar = document.createElement('div');
 				this.bar.className = 'rh-sticky-bar';
+				this.bar.style.display = 'none';
 				view.dom.appendChild(this.bar);
 
 				this.boundaries = computeHeadingBoundaries(view.state.doc.toString());
 
-				// Scroll listener for per-pixel responsiveness; rAF-throttled.
 				this.scrollHandler = () => {
 					if (this.rafPending) return;
 					this.rafPending = true;
 					requestAnimationFrame(() => {
-						renderBar(this.bar, this.view, this.boundaries, getSettings());
+						renderEditorBar(this.bar, this.view, this.boundaries, getSettings());
 						this.rafPending = false;
 					});
 				};
 				view.scrollDOM.addEventListener('scroll', this.scrollHandler, { passive: true });
 
-				renderBar(this.bar, view, this.boundaries, getSettings());
+				renderEditorBar(this.bar, view, this.boundaries, getSettings());
 			}
 
 			update(update: ViewUpdate) {
 				if (update.docChanged) {
-					this.boundaries = computeHeadingBoundaries(
-						update.view.state.doc.toString(),
-					);
+					this.boundaries = computeHeadingBoundaries(update.view.state.doc.toString());
 				}
 				if (update.docChanged || update.geometryChanged) {
-					renderBar(this.bar, update.view, this.boundaries, getSettings());
+					renderEditorBar(this.bar, update.view, this.boundaries, getSettings());
 				}
 			}
 
@@ -205,4 +160,144 @@ export function buildStickyBarExtension(getSettings: () => ReturnHeadingsSetting
 			}
 		},
 	);
+}
+
+// ── Reading View implementation ──────────────────────────────────────────────
+
+/**
+ * DOM-based sticky bar for Reading View.
+ *
+ * Injected as `position:absolute; top:0` into `.markdown-preview-view`.
+ * On each scroll frame it walks rendered `<h1>`–`<h6>` elements and builds
+ * a heading stack from whatever is above the bar's bottom edge.
+ *
+ * Return markers are not reflected here (they're hidden in Reading View) —
+ * the context is based on the raw rendered heading hierarchy only.
+ */
+export class ReadingViewStickyBar {
+	private bar: HTMLElement;
+	private previewEl: HTMLElement | null = null;
+	private scrollEl: HTMLElement | null = null;
+	private rafPending = false;
+	private contextKey = '';
+	private scrollHandler: (() => void) | null = null;
+
+	constructor(
+		private readonly view: MarkdownView,
+		private readonly getSettings: () => ReturnHeadingsSettings,
+	) {
+		this.bar = document.createElement('div');
+		this.bar.className = 'rh-sticky-bar';
+		this.bar.style.display = 'none';
+	}
+
+	attach(): void {
+		const previewEl =
+			this.view.containerEl.querySelector<HTMLElement>('.markdown-preview-view');
+		if (!previewEl) return;
+
+		this.previewEl = previewEl;
+		// Overlay the preview so content scrolls beneath the bar.
+		previewEl.style.position = 'relative';
+		previewEl.prepend(this.bar);
+
+		// Walk up to find the actual scroll container.
+		this.scrollEl = this.findScrollParent(previewEl);
+
+		this.scrollHandler = () => {
+			if (this.rafPending) return;
+			this.rafPending = true;
+			requestAnimationFrame(() => {
+				this.update();
+				this.rafPending = false;
+			});
+		};
+		this.scrollEl?.addEventListener('scroll', this.scrollHandler, { passive: true });
+
+		this.update();
+	}
+
+	detach(): void {
+		if (this.scrollHandler && this.scrollEl) {
+			this.scrollEl.removeEventListener('scroll', this.scrollHandler);
+		}
+		this.bar.remove();
+	}
+
+	private findScrollParent(el: HTMLElement): HTMLElement {
+		let cur: HTMLElement | null = el.parentElement;
+		while (cur && cur !== document.body) {
+			const { overflowY } = window.getComputedStyle(cur);
+			if (overflowY === 'auto' || overflowY === 'scroll') return cur;
+			cur = cur.parentElement;
+		}
+		return document.documentElement as HTMLElement;
+	}
+
+	private update(): void {
+		const settings = this.getSettings();
+		if (!settings.stickyHeadingsEnabled || !this.previewEl) {
+			this.bar.style.display = 'none';
+			return;
+		}
+
+		const scrollTop = this.scrollEl?.scrollTop ?? window.scrollY;
+		if (scrollTop < 1) {
+			this.bar.style.display = 'none';
+			return;
+		}
+
+		const section = this.previewEl.querySelector<HTMLElement>('.markdown-preview-section');
+		if (!section) return;
+
+		const headingEls = Array.from(
+			section.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6'),
+		);
+		if (headingEls.length === 0) {
+			this.bar.style.display = 'none';
+			return;
+		}
+
+		// Build context from headings whose bottom edge is above the bar's bottom.
+		const barBottom =
+			this.previewEl.getBoundingClientRect().top + (this.bar.offsetHeight || 0) + 2;
+
+		const stack: { level: number; text: string; el: HTMLElement }[] = [];
+
+		for (const h of headingEls) {
+			if (h.getBoundingClientRect().bottom > barBottom) break;
+			const level = parseInt(h.tagName[1]!);
+			const text = h.textContent?.trim() ?? '';
+			while (stack.length > 0 && stack[stack.length - 1]!.level >= level) stack.pop();
+			stack.push({ level, text, el: h });
+		}
+
+		if (stack.length === 0) {
+			this.bar.style.display = 'none';
+			return;
+		}
+
+		const contextKey = stack.map(s => `${s.level}:${s.text}`).join('|');
+		if (contextKey === this.contextKey) return;
+		this.contextKey = contextKey;
+
+		this.bar.empty();
+		const visible = stack.length > MAX_LINES ? stack.slice(-MAX_LINES) : stack;
+
+		for (let i = 0; i < visible.length; i++) {
+			const entry = visible[i]!;
+			const isLast = i === visible.length - 1;
+			const line = this.bar.createEl('div', {
+				cls: `rh-sticky-line rh-sticky-h${entry.level}${isLast ? ' rh-sticky-line-last' : ''}`,
+			});
+			line.createEl('span', { text: '#'.repeat(entry.level) + ' ', cls: 'rh-sticky-prefix' });
+			line.createEl('span', { text: entry.text, cls: 'rh-sticky-text' });
+			const targetEl = entry.el;
+			line.addEventListener('click', () =>
+				targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+			);
+		}
+
+		this.bar.style.display = '';
+	}
 }

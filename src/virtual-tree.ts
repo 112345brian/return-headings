@@ -87,17 +87,22 @@ export function buildVirtualTree(content: string): OutlineNode[] {
 		if (!marker) continue;
 
 		const targetLevel = resolveDepth(marker, topLevel());
+
+		// Pop the stack now so we can read the target heading's name.
+		while (stack.length > 0 && stack[stack.length - 1]!.level > targetLevel) stack.pop();
+		const targetHeading = stack[stack.length - 1];
+		// Show "↩ Kant" rather than "↩ H2" — the heading name is more informative.
+		const returnLabel = targetHeading ? `↩ ${targetHeading.text}` : getDisplayLabel(marker);
+
 		const node: OutlineNode = {
 			type: 'return',
 			level: targetLevel,
-			text: getDisplayLabel(marker),
+			text: returnLabel,
 			line: i,
 			children: [],
 		};
 
-		// Pop until the heading we're returning TO is at the top of the stack.
-		// The return node becomes a child of that heading (sibling of sub-headings).
-		while (stack.length > 0 && stack[stack.length - 1]!.level > targetLevel) stack.pop();
+		// Stack already popped above when reading the target heading name.
 		addChild(node);
 		// Return nodes are NOT pushed — they don't become new heading contexts.
 	}

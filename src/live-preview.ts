@@ -24,7 +24,7 @@ import {
 } from '@codemirror/view';
 import { RangeSetBuilder } from '@codemirror/state';
 import type { ReturnHeadingsSettings } from './settings';
-import { getDisplayLabel, parseMarker, validateMarker } from './parser';
+import { getDisplayLabel, parseMarker, resolveDepth, validateMarker } from './parser';
 
 // ── Widget ───────────────────────────────────────────────────────────────────
 
@@ -89,17 +89,26 @@ export function buildLivePreviewExtension(getSettings: () => ReturnHeadingsSetti
 					cursorLines.add(view.state.doc.lineAt(range.head).number);
 				}
 
-				// Track heading depth so relative markers can be validated.
-				let currentDepth = 0;
+				// Track full heading stack (level + text) so return-marker labels
+				// can show the actual heading name rather than a generic "↩ H2".
+				const headingStack: { level: number; text: string }[] = [];
 				const doc = view.state.doc;
 
 				for (let i = 1; i <= doc.lines; i++) {
 					const line = doc.line(i);
 					const text = line.text.trim();
 
-					const headingMatch = text.match(/^(#{1,6}) /);
-					if (headingMatch?.[1]) {
-						currentDepth = headingMatch[1].length;
+					const headingMatch = text.match(/^(#{1,6}) (.+)/);
+					if (headingMatch?.[1] && headingMatch?.[2]) {
+						const level = headingMatch[1].length;
+						const headingText = headingMatch[2].trim();
+						while (
+							headingStack.length > 0 &&
+							headingStack[headingStack.length - 1]!.level >= level
+						) {
+							headingStack.pop();
+						}
+						headingStack.push({ level, text: headingText });
 						continue;
 					}
 
@@ -107,7 +116,6 @@ export function buildLivePreviewExtension(getSettings: () => ReturnHeadingsSetti
 					if (!marker) continue;
 
 					if (cursorLines.has(i)) {
-						// Cursor on this line: keep raw text, apply a faint style class.
 						builder.add(
 							line.from,
 							line.from,
@@ -116,11 +124,27 @@ export function buildLivePreviewExtension(getSettings: () => ReturnHeadingsSetti
 						continue;
 					}
 
+					const currentLevel =
+						headingStack.length > 0 ? headingStack[headingStack.length - 1]!.level : 0;
+
+					// Resolve the target heading name for an informative label.
+					const targetLevel = resolveDepth(marker, currentLevel);
+					const targetStack = headingStack.slice();
+					while (
+						targetStack.length > 0 &&
+						targetStack[targetStack.length - 1]!.level > targetLevel
+					) {
+						targetStack.pop();
+					}
+					const targetHeading = targetStack[targetStack.length - 1];
+					const label = targetHeading
+						? `↩ ${targetHeading.text}`
+						: getDisplayLabel(marker);
+
 					if (settings.showSubtleMarkersInLivePreview) {
-						const label = getDisplayLabel(marker);
 						const invalid =
-							settings.validateImpossibleReturns && currentDepth > 0
-								? validateMarker(marker, currentDepth) !== null
+							settings.validateImpossibleReturns && currentLevel > 0
+								? validateMarker(marker, currentLevel) !== null
 								: false;
 
 						builder.add(
@@ -129,7 +153,6 @@ export function buildLivePreviewExtension(getSettings: () => ReturnHeadingsSetti
 							Decoration.replace({ widget: new ReturnMarkerWidget(label, invalid) }),
 						);
 					} else {
-						// Subtle mode off: keep raw text but dim the line.
 						builder.add(
 							line.from,
 							line.from,
