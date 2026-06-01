@@ -1,89 +1,53 @@
-import {
-	Editor,
-	MarkdownView,
-	MarkdownFileInfo,
-	Modal,
-	Notice,
-	Plugin,
-} from 'obsidian';
-import {
-	DEFAULT_SETTINGS,
-	MyPluginSettings,
-	SampleSettingTab,
-} from './settings';
+import { Editor, MarkdownView, Plugin } from 'obsidian';
+import { DEFAULT_SETTINGS, ReturnHeadingsSettingTab, type ReturnHeadingsSettings } from './settings';
+import { buildLivePreviewExtension } from './live-preview';
+import { buildReadingViewProcessor } from './reading-view';
 
-// Remember to rename these classes and interfaces!
-
-export default class MyPlugin extends Plugin {
-	settings!: MyPluginSettings;
+export default class ReturnHeadingsPlugin extends Plugin {
+	settings!: ReturnHeadingsSettings;
 
 	async onload() {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (_evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
+		this.registerMarkdownPostProcessor(buildReadingViewProcessor(() => this.settings));
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
+		this.registerEditorExtension(buildLivePreviewExtension(() => this.settings));
 
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			},
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (
-				editor: Editor,
-				_ctx: MarkdownView | MarkdownFileInfo,
-			) => {
-				editor.replaceSelection('Sample editor command');
-			},
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView =
-					this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
+		this.addSettingTab(new ReturnHeadingsSettingTab(this.app, this));
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
+		// Absolute return commands
+		for (let level = 1; level <= 6; level++) {
+			this.addCommand({
+				id: `insert-return-h${level}`,
+				name: `Insert return to H${level}`,
+				editorCallback: (editor: Editor) => insertMarker(editor, `---h${level}`),
+			});
+		}
+
+		// Relative return commands
+		for (const steps of [1, 2, 3]) {
+			this.addCommand({
+				id: `insert-return-up-${steps}`,
+				name: `Insert return up ${steps} heading${steps > 1 ? 's' : ''}`,
+				editorCallback: (editor: Editor) => insertMarker(editor, `---h-${steps}`),
+			});
+		}
+
+		// Toggle marker visibility
+		this.addCommand({
+			id: 'toggle-marker-visibility',
+			name: 'Toggle visibility of return markers',
+			callback: async () => {
+				this.settings.hideMarkersInReadingView = !this.settings.hideMarkersInReadingView;
+				this.settings.showSubtleMarkersInLivePreview = !this.settings.showSubtleMarkersInLivePreview;
+				await this.saveSettings();
+				// Refresh active markdown view
+				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (view) {
+					view.editor.refresh();
 				}
-				return false;
 			},
 		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(activeDocument, 'click', (_evt: MouseEvent) => {
-			new Notice('Click');
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(
-			window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000),
-		);
 	}
 
 	onunload() {}
@@ -92,7 +56,7 @@ export default class MyPlugin extends Plugin {
 		this.settings = Object.assign(
 			{},
 			DEFAULT_SETTINGS,
-			(await this.loadData()) as Partial<MyPluginSettings>,
+			(await this.loadData()) as Partial<ReturnHeadingsSettings>,
 		);
 	}
 
@@ -101,14 +65,15 @@ export default class MyPlugin extends Plugin {
 	}
 }
 
-class SampleModal extends Modal {
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
+function insertMarker(editor: Editor, marker: string) {
+	const cursor = editor.getCursor();
+	const currentLine = editor.getLine(cursor.line);
+	if (currentLine.trim() === '') {
+		editor.setLine(cursor.line, marker);
+		editor.setCursor({ line: cursor.line, ch: marker.length });
+	} else {
+		const insertPos = { line: cursor.line, ch: currentLine.length };
+		editor.replaceRange(`\n${marker}\n`, insertPos);
+		editor.setCursor({ line: cursor.line + 1, ch: marker.length });
 	}
 }

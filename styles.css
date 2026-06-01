@@ -1,8 +1,44 @@
-/*
+/* Reading View: hidden markers */
+.heading-return-hidden {
+	display: none;
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+/* Reading View: visible label when hiding is disabled */
+.heading-return-visible {
+	display: block;
+}
 
-If your plugin does not need CSS, delete this file.
+.heading-return-label {
+	opacity: 0.4;
+	font-style: italic;
+	font-size: 0.85em;
+	user-select: none;
+}
 
-*/
+/* Live Preview: widget shown when cursor is elsewhere */
+.heading-return-marker {
+	opacity: 0.45;
+	font-style: italic;
+	font-size: 0.85em;
+	color: var(--text-muted);
+	user-select: none;
+	padding: 0 0.25em;
+}
+
+.heading-return-marker-invalid {
+	color: var(--color-red);
+	opacity: 0.75;
+}
+
+/* Live Preview: line style when cursor is on the marker line */
+.heading-return-marker-editing {
+	opacity: 0.6;
+	font-style: italic;
+	color: var(--text-muted);
+}
+
+/* Live Preview: raw line style when subtle preview is disabled */
+.heading-return-marker-raw {
+	opacity: 0.45;
+	color: var(--text-muted);
+}
