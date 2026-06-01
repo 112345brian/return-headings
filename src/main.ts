@@ -2,6 +2,7 @@ import { Editor, MarkdownView, Plugin } from 'obsidian';
 import { DEFAULT_SETTINGS, ReturnHeadingsSettingTab, type ReturnHeadingsSettings } from './settings';
 import { buildLivePreviewExtension } from './live-preview';
 import { buildReadingViewProcessor } from './reading-view';
+import { ReturnHeadingsOutlineView, VIEW_TYPE_OUTLINE } from './outline-view';
 
 export default class ReturnHeadingsPlugin extends Plugin {
 	settings!: ReturnHeadingsSettings;
@@ -9,13 +10,30 @@ export default class ReturnHeadingsPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
+		// Reading View
 		this.registerMarkdownPostProcessor(buildReadingViewProcessor(() => this.settings));
 
+		// Live Preview
 		this.registerEditorExtension(buildLivePreviewExtension(() => this.settings));
+
+		// Semantic Outline pane
+		this.registerView(VIEW_TYPE_OUTLINE, leaf => new ReturnHeadingsOutlineView(leaf, this));
+
+		this.addRibbonIcon('list-tree', 'Return Headings outline', () => {
+			this.activateOutlineView();
+		});
+
+		// Refresh outline on file switch or edit
+		this.registerEvent(
+			this.app.workspace.on('active-leaf-change', () => this.refreshOutlineView()),
+		);
+		this.registerEvent(
+			this.app.workspace.on('editor-change', () => this.refreshOutlineView()),
+		);
 
 		this.addSettingTab(new ReturnHeadingsSettingTab(this.app, this));
 
-		// Absolute return commands
+		// Absolute return commands H1–H6
 		for (let level = 1; level <= 6; level++) {
 			this.addCommand({
 				id: `insert-return-h${level}`,
@@ -24,7 +42,7 @@ export default class ReturnHeadingsPlugin extends Plugin {
 			});
 		}
 
-		// Relative return commands
+		// Relative return commands up 1–3
 		for (const steps of [1, 2, 3]) {
 			this.addCommand({
 				id: `insert-return-up-${steps}`,
@@ -39,18 +57,24 @@ export default class ReturnHeadingsPlugin extends Plugin {
 			name: 'Toggle visibility of return markers',
 			callback: async () => {
 				this.settings.hideMarkersInReadingView = !this.settings.hideMarkersInReadingView;
-				this.settings.showSubtleMarkersInLivePreview = !this.settings.showSubtleMarkersInLivePreview;
+				this.settings.showSubtleMarkersInLivePreview =
+					!this.settings.showSubtleMarkersInLivePreview;
 				await this.saveSettings();
-				// Refresh active markdown view
-				const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (view) {
-					view.editor.refresh();
-				}
+				this.app.workspace.getActiveViewOfType(MarkdownView)?.editor.refresh();
 			},
+		});
+
+		// Open outline command
+		this.addCommand({
+			id: 'open-outline',
+			name: 'Open Return Headings outline',
+			callback: () => this.activateOutlineView(),
 		});
 	}
 
-	onunload() {}
+	onunload() {
+		this.app.workspace.detachLeavesOfType(VIEW_TYPE_OUTLINE);
+	}
 
 	async loadSettings() {
 		this.settings = Object.assign(
@@ -63,6 +87,25 @@ export default class ReturnHeadingsPlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
+
+	private refreshOutlineView() {
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_OUTLINE)) {
+			(leaf.view as ReturnHeadingsOutlineView).scheduleRefresh();
+		}
+	}
+
+	private async activateOutlineView() {
+		const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_OUTLINE);
+		if (existing.length > 0) {
+			this.app.workspace.revealLeaf(existing[0]!);
+			return;
+		}
+		const leaf = this.app.workspace.getRightLeaf(false);
+		if (leaf) {
+			await leaf.setViewState({ type: VIEW_TYPE_OUTLINE, active: true });
+			this.app.workspace.revealLeaf(leaf);
+		}
+	}
 }
 
 function insertMarker(editor: Editor, marker: string) {
@@ -72,8 +115,7 @@ function insertMarker(editor: Editor, marker: string) {
 		editor.setLine(cursor.line, marker);
 		editor.setCursor({ line: cursor.line, ch: marker.length });
 	} else {
-		const insertPos = { line: cursor.line, ch: currentLine.length };
-		editor.replaceRange(`\n${marker}\n`, insertPos);
+		editor.replaceRange(`\n${marker}\n`, { line: cursor.line, ch: currentLine.length });
 		editor.setCursor({ line: cursor.line + 1, ch: marker.length });
 	}
 }

@@ -1,9 +1,39 @@
-/* Reading View: hidden markers */
+/* ─── Live Preview ─────────────────────────────────────────────────────────── */
+
+/* Widget shown when cursor is off the marker line */
+.heading-return-marker {
+	opacity: 0.45;
+	font-style: italic;
+	font-size: 0.85em;
+	color: var(--text-muted);
+	user-select: none;
+	padding: 0 0.2em;
+}
+
+.heading-return-marker-invalid {
+	color: var(--color-red);
+	opacity: 0.8;
+}
+
+/* Line class when cursor is ON the marker line (raw syntax visible) */
+.heading-return-marker-editing {
+	opacity: 0.55;
+	font-style: italic;
+	color: var(--text-muted);
+}
+
+/* Line class when subtle preview is disabled */
+.heading-return-marker-raw {
+	opacity: 0.45;
+	color: var(--text-muted);
+}
+
+/* ─── Reading View ──────────────────────────────────────────────────────────── */
+
 .heading-return-hidden {
 	display: none;
 }
 
-/* Reading View: visible label when hiding is disabled */
 .heading-return-visible {
 	display: block;
 }
@@ -15,30 +45,57 @@
 	user-select: none;
 }
 
-/* Live Preview: widget shown when cursor is elsewhere */
-.heading-return-marker {
-	opacity: 0.45;
+/* ─── Semantic Outline Pane ─────────────────────────────────────────────────── */
+
+.rh-outline {
+	padding: 6px 0;
+	font-size: var(--font-ui-small);
+	overflow-y: auto;
+	height: 100%;
+	box-sizing: border-box;
+}
+
+.rh-outline-empty {
+	padding: 12px 16px;
+	color: var(--text-muted);
 	font-style: italic;
-	font-size: 0.85em;
+}
+
+.rh-outline-tree {
+	padding: 0 4px;
+}
+
+/* Children container — each nesting level adds indentation */
+.rh-outline-children {
+	padding-left: 1.1em;
+}
+
+.rh-outline-label {
+	display: block;
+	padding: 2px 8px;
+	border-radius: var(--radius-s);
+	cursor: pointer;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	line-height: 1.5;
+}
+
+.rh-outline-label:hover {
+	background: var(--background-modifier-hover);
+}
+
+/* Real headings: normal text weight, slight size variation by level */
+.rh-outline-heading > .rh-outline-label {
+	color: var(--text-normal);
+}
+
+.rh-outline-heading > .rh-outline-label[data-level="1"] { font-weight: var(--font-semibold); }
+.rh-outline-heading > .rh-outline-label[data-level="2"] { font-weight: var(--font-medium); }
+
+/* Return marker nodes: muted + italic */
+.rh-outline-return > .rh-outline-label {
 	color: var(--text-muted);
-	user-select: none;
-	padding: 0 0.25em;
-}
-
-.heading-return-marker-invalid {
-	color: var(--color-red);
-	opacity: 0.75;
-}
-
-/* Live Preview: line style when cursor is on the marker line */
-.heading-return-marker-editing {
-	opacity: 0.6;
 	font-style: italic;
-	color: var(--text-muted);
-}
-
-/* Live Preview: raw line style when subtle preview is disabled */
-.heading-return-marker-raw {
-	opacity: 0.45;
-	color: var(--text-muted);
+	font-size: 0.9em;
 }

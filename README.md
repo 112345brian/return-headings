@@ -35,22 +35,30 @@ More notes about space, resumed under Hegel rather than as a new top-level secti
 
 ## What this version does
 
-v0.1 is a **syntax and decoration plugin**. It:
+v0.2 adds a **Semantic Outline pane** that builds a virtual heading tree from return markers, making the structural intent of your document visible and navigable.
 
+**Syntax + decoration (since v0.1):**
 - Parses `---hN` and `---h-N` marker lines
 - Hides markers in Reading View (or shows a faint `↩ H2` label)
-- Replaces markers with a styled label in Live Preview while the cursor is elsewhere; shows raw syntax when editing the line
+- Replaces markers in Live Preview with a styled label while the cursor is elsewhere; shows raw syntax on the active line
 - Highlights invalid markers (e.g. `---h7`, or `---h-5` inside an H2) in red when validation is enabled
-- Adds commands to insert any marker from the command palette
+- Commands to insert any marker from the command palette
 
-**What v0.1 does not do:** it does not alter Obsidian's heading structure, metadata cache, native outline pane, folding, backlinks, or export. Paragraphs after a return marker are not yet semantically re-parented in any Obsidian-native sense. The markers are notation only — visual and validated, but not yet structurally operative.
+**Semantic Outline pane (v0.2):**
+- Opens in the right sidebar (ribbon icon or command palette)
+- Builds a virtual heading stack that resolves return markers into a tree
+- Return markers appear as `↩ H2` siblings within the heading they re-enter, showing the exact point of structural re-entry
+- Every item is clickable — jumps to that line in the editor
+- Refreshes automatically on file switch and document edit
+
+**What this plugin does not do:** it does not alter Obsidian's native metadata cache, native outline pane, folding, backlinks, or export output. The semantic outline pane is a separate custom view — native Obsidian tooling (graph, backlinks, Dataview) still sees the raw Markdown structure.
 
 ## Roadmap
 
 | Version | Focus |
 |---------|-------|
-| **0.1** | Marker UX — parse, decorate, hide/show, commands, validation |
-| **0.2** | Semantic Outline — custom side pane with virtual heading stack, click-to-jump, parent-return relationships |
+| **0.1** | Marker UX — parse, decorate, hide/show, commands, validation ✓ |
+| **0.2** | Semantic Outline — custom side pane with virtual heading stack, click-to-jump, parent-return relationships ✓ |
 | **0.3** | Refactor tools — convert repeated identical headings into return markers, normalize absolute/relative, validate entire file |
 | **0.4** | Export support — transform markers for HTML/PDF/Pandoc output |
 
