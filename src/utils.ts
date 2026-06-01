@@ -155,6 +155,40 @@ export function getContextAtLine(content: string, targetLine: number): HeadingEn
 	return stack;
 }
 
+/**
+ * Binary-searches the boundary list for the first boundary whose line is
+ * strictly **greater than** `currentLine` — i.e. the next structural event
+ * that will change the heading context as the user scrolls down.
+ *
+ * Returns the 0-indexed line number of that boundary, or `null` if there are
+ * no more boundaries after `currentLine`.
+ *
+ * Used by the sticky bar to determine when to update the displayed context.
+ *
+ * @param boundaries - Output of `computeHeadingBoundaries`.
+ * @param currentLine - 0-indexed line at the top of the visible editor area.
+ */
+export function findNextBoundaryLine(
+	boundaries: HeadingBoundary[],
+	currentLine: number,
+): number | null {
+	let lo = 0;
+	let hi = boundaries.length - 1;
+	let result = -1;
+
+	while (lo <= hi) {
+		const mid = (lo + hi) >>> 1;
+		if (boundaries[mid]!.line > currentLine) {
+			result = mid;
+			hi = mid - 1;
+		} else {
+			lo = mid + 1;
+		}
+	}
+
+	return result >= 0 ? (boundaries[result]!.line ?? null) : null;
+}
+
 // ── CM6 scroll helper ────────────────────────────────────────────────────────
 
 /**

@@ -42,52 +42,116 @@
 	user-select: none;
 }
 
-/* ─── Sticky Heading Bar ────────────────────────────────────────────────────── */
+/* ─── Sticky Heading Bar (VS Code sticky-scroll style) ──────────────────────
+ *
+ * The bar is injected as position:absolute into .cm-editor so editor content
+ * scrolls underneath it — the same strategy VS Code uses. This produces the
+ * natural "peek" transition: as the next heading scrolls toward the top of
+ * the viewport, it is visible in the content behind the bar before the
+ * context updates. No animation code is needed; the scroll itself provides
+ * the transition.
+ *
+ * Each line shows the raw heading source text ("## Heading name") with
+ * level-appropriate colour, matching VS Code's "exact source styling".
+ * ─────────────────────────────────────────────────────────────────────────── */
 
 .rh-sticky-bar {
+	/* Overlay the editor content — VS Code approach. */
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	z-index: 10;
+
+	/* Each line has its own background; container is transparent. */
+	background: transparent;
+	padding: 0;
+	overflow: visible; /* don't clip lines that animate */
+	pointer-events: none; /* let clicks through by default */
+}
+
+/* ── Individual sticky lines ─────────────────────────────────────────────── */
+
+.rh-sticky-line {
 	display: flex;
 	align-items: center;
-	flex-wrap: nowrap;
 	gap: 0;
-	padding: 3px 10px;
+	padding: 0 var(--file-margins, 2em);
+	height: calc(var(--line-height-normal, 1.5) * 1em + 2px);
+	line-height: var(--line-height-normal, 1.5);
 	background: var(--background-primary);
-	border-bottom: 1px solid var(--background-modifier-border);
-	font-size: var(--font-ui-small);
-	line-height: 1.4;
-	min-height: 26px;
-	overflow: hidden;
-}
-
-.rh-sticky-sep {
-	color: var(--text-faint);
-	padding: 0 3px;
-	user-select: none;
-	font-size: 0.8em;
-	flex-shrink: 0;
-}
-
-.rh-sticky-item {
 	cursor: pointer;
-	color: var(--text-muted);
+	pointer-events: auto;
+	overflow: hidden;       /* clip content when line is translated out */
+	will-change: transform; /* hint to compositor */
 	white-space: nowrap;
-	max-width: 180px;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	padding: 1px 4px;
-	border-radius: var(--radius-s);
-	transition: background 80ms, color 80ms;
-	flex-shrink: 1;
 }
 
-.rh-sticky-item:hover {
-	color: var(--text-normal);
+.rh-sticky-line:hover {
 	background: var(--background-modifier-hover);
 }
 
-/* The rightmost item is the current heading — highlight it */
-.rh-sticky-item.rh-sticky-current {
-	color: var(--text-normal);
+/* Separator only on the final line — marks the bottom of the sticky zone. */
+.rh-sticky-line-last {
+	border-bottom: 1px solid var(--background-modifier-border);
+	box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.12);
 }
+
+/* ── Hash prefix (`## `) ─────────────────────────────────────────────────── */
+
+.rh-sticky-prefix {
+	/* Muted, matching VS Code's dimmed syntax token for Markdown heading marks. */
+	color: var(--text-faint);
+	font-family: var(--font-monospace, monospace);
+	font-size: inherit;
+	letter-spacing: -0.02em;
+	flex-shrink: 0;
+}
+
+/* ── Heading text ────────────────────────────────────────────────────────── */
+
+.rh-sticky-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	flex: 1;
+	min-width: 0;
+}
+
+/*
+ * Level-matched colours and weights. Uses Obsidian's CSS variables where
+ * present (many themes define --h1-color etc.); falls back to sensible
+ * defaults so the bar is readable even in themes that don't set them.
+ */
+.rh-sticky-h1 .rh-sticky-text {
+	color: var(--h1-color, var(--text-normal));
+	font-size: var(--h1-size, 1em);
+	font-weight: var(--h1-weight, var(--font-bold, 700));
+}
+.rh-sticky-h2 .rh-sticky-text {
+	color: var(--h2-color, var(--text-normal));
+	font-size: var(--h2-size, 1em);
+	font-weight: var(--h2-weight, var(--font-semibold, 600));
+}
+.rh-sticky-h3 .rh-sticky-text {
+	color: var(--h3-color, var(--text-normal));
+	font-size: var(--h3-size, 1em);
+	font-weight: var(--h3-weight, var(--font-medium, 500));
+}
+.rh-sticky-h4 .rh-sticky-text,
+.rh-sticky-h5 .rh-sticky-text,
+.rh-sticky-h6 .rh-sticky-text {
+	color: var(--h4-color, var(--text-muted));
+	font-size: 1em;
+	font-weight: var(--font-normal, 400);
+}
+
+/*
+ * The `##` prefix inherits its muted color at all levels, but mirrors the
+ * text size so the line height stays consistent.
+ */
+.rh-sticky-h1 .rh-sticky-prefix { font-size: var(--h1-size, 1em); }
+.rh-sticky-h2 .rh-sticky-prefix { font-size: var(--h2-size, 1em); }
+.rh-sticky-h3 .rh-sticky-prefix { font-size: var(--h3-size, 1em); }
 
 /* ─── Semantic Outline Pane ─────────────────────────────────────────────────── */
 
