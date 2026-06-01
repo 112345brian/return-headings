@@ -1,12 +1,40 @@
+/**
+ * Semantic Outline side pane — custom `ItemView`.
+ *
+ * Renders the virtual heading tree (produced by `buildVirtualTree`) as a
+ * clickable sidebar panel. Unlike Obsidian's native Outline pane, this view
+ * understands heading-return markers: return nodes appear as `↩ H2` siblings
+ * within the heading they re-enter, visually encoding the structural re-entry.
+ *
+ * The pane is registered as a custom view type and can be opened via the
+ * ribbon icon or the command palette.
+ */
+
 import { ItemView, MarkdownView, WorkspaceLeaf } from 'obsidian';
 import type ReturnHeadingsPlugin from './main';
 import { buildVirtualTree, type OutlineNode } from './virtual-tree';
 
 export const VIEW_TYPE_OUTLINE = 'return-headings-outline';
 
+// ── View ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Custom `ItemView` that renders the virtual heading tree for the currently
+ * active Markdown file.
+ *
+ * Refresh is debounced (150 ms) to avoid excessive rebuilds during fast
+ * typing. The main plugin calls `scheduleRefresh()` on `active-leaf-change`
+ * and `editor-change`.
+ */
 export class ReturnHeadingsOutlineView extends ItemView {
 	plugin: ReturnHeadingsPlugin;
 	private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/**
+	 * Stable reference to our content root. Created once in `onOpen` so
+	 * `refresh()` doesn't re-query the DOM on every call.
+	 */
+	private rootEl!: HTMLElement;
 
 	constructor(leaf: WorkspaceLeaf, plugin: ReturnHeadingsPlugin) {
 		super(leaf);
@@ -26,6 +54,9 @@ export class ReturnHeadingsOutlineView extends ItemView {
 	}
 
 	async onOpen() {
+		// Create a stable content root we own, independent of Obsidian's
+		// internal containerEl structure.
+		this.rootEl = this.containerEl.createEl('div', { cls: 'rh-outline' });
 		this.refresh();
 	}
 
@@ -33,20 +64,23 @@ export class ReturnHeadingsOutlineView extends ItemView {
 		if (this.refreshTimer !== null) clearTimeout(this.refreshTimer);
 	}
 
+	/**
+	 * Schedules a debounced refresh. Safe to call frequently (e.g. on every
+	 * keypress via `editor-change`).
+	 */
 	scheduleRefresh() {
 		if (this.refreshTimer !== null) clearTimeout(this.refreshTimer);
 		this.refreshTimer = setTimeout(() => this.refresh(), 150);
 	}
 
+	/** Rebuilds the entire tree from the active document. */
 	refresh() {
-		// children[0] is the header bar Obsidian adds; children[1] is our content area
-		const container = this.containerEl.children[1] as HTMLElement;
-		container.empty();
-		container.addClass('rh-outline');
+		if (!this.rootEl) return;
+		this.rootEl.empty();
 
 		const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!mdView) {
-			container.createEl('div', {
+			this.rootEl.createEl('div', {
 				text: 'Open a Markdown file to see its outline.',
 				cls: 'rh-outline-empty',
 			});
@@ -56,16 +90,18 @@ export class ReturnHeadingsOutlineView extends ItemView {
 		const tree = buildVirtualTree(mdView.editor.getValue());
 
 		if (tree.length === 0) {
-			container.createEl('div', {
+			this.rootEl.createEl('div', {
 				text: 'No headings found.',
 				cls: 'rh-outline-empty',
 			});
 			return;
 		}
 
-		const treeEl = container.createEl('div', { cls: 'rh-outline-tree' });
+		const treeEl = this.rootEl.createEl('div', { cls: 'rh-outline-tree' });
 		this.renderNodes(treeEl, tree, mdView);
 	}
+
+	// ── Private ───────────────────────────────────────────────────────────────
 
 	private renderNodes(parent: HTMLElement, nodes: OutlineNode[], mdView: MarkdownView) {
 		for (const node of nodes) {
@@ -79,11 +115,12 @@ export class ReturnHeadingsOutlineView extends ItemView {
 				attr: { 'data-level': String(node.level) },
 			});
 
+			const targetLine = node.line;
 			label.addEventListener('click', () => {
 				const editor = mdView.editor;
-				editor.setCursor({ line: node.line, ch: 0 });
+				editor.setCursor({ line: targetLine, ch: 0 });
 				editor.scrollIntoView(
-					{ from: { line: node.line, ch: 0 }, to: { line: node.line, ch: 0 } },
+					{ from: { line: targetLine, ch: 0 }, to: { line: targetLine, ch: 0 } },
 					true,
 				);
 				this.app.workspace.setActiveLeaf(mdView.leaf, { focus: true });

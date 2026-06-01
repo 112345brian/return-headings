@@ -1,3 +1,19 @@
+/**
+ * CodeMirror 6 editor extension for Live Preview / source mode.
+ *
+ * Scans the full document on every relevant update and applies decorations to
+ * heading-return marker lines:
+ *
+ * - When the cursor is **on** the marker line: applies a CSS class so the raw
+ *   syntax remains visible but styled faintly (editing-in-place feel).
+ * - When the cursor is **elsewhere**: replaces the line with a `↩ H2`-style
+ *   widget. Invalid markers (e.g. `---h7`) are highlighted in red if
+ *   validation is enabled in settings.
+ *
+ * Registered via `Plugin.registerEditorExtension()` so it applies to every
+ * open markdown editor.
+ */
+
 import {
 	Decoration,
 	DecorationSet,
@@ -10,6 +26,9 @@ import { RangeSetBuilder } from '@codemirror/state';
 import type { ReturnHeadingsSettings } from './settings';
 import { getDisplayLabel, parseMarker, validateMarker } from './parser';
 
+// ── Widget ───────────────────────────────────────────────────────────────────
+
+/** Inline replacement widget rendered for off-cursor marker lines. */
 class ReturnMarkerWidget extends WidgetType {
 	constructor(
 		readonly label: string,
@@ -32,6 +51,19 @@ class ReturnMarkerWidget extends WidgetType {
 	}
 }
 
+// ── Extension ────────────────────────────────────────────────────────────────
+
+/**
+ * Builds the CM6 `ViewPlugin` extension that decorates heading-return markers
+ * in Live Preview / source mode.
+ *
+ * The plugin tracks heading depth by scanning all lines in document order,
+ * so relative return markers (`---h-1`) are validated against the correct
+ * depth even when they appear deep in the document.
+ *
+ * @param getSettings - Accessor for the current plugin settings (called on
+ *   every rebuild so settings changes are reflected immediately).
+ */
 export function buildLivePreviewExtension(getSettings: () => ReturnHeadingsSettings) {
 	return ViewPlugin.fromClass(
 		class {
@@ -51,11 +83,13 @@ export function buildLivePreviewExtension(getSettings: () => ReturnHeadingsSetti
 				const settings = getSettings();
 				const builder = new RangeSetBuilder<Decoration>();
 
+				// Lines that contain a cursor selection — show raw syntax there.
 				const cursorLines = new Set<number>();
 				for (const range of view.state.selection.ranges) {
 					cursorLines.add(view.state.doc.lineAt(range.head).number);
 				}
 
+				// Track heading depth so relative markers can be validated.
 				let currentDepth = 0;
 				const doc = view.state.doc;
 
@@ -64,7 +98,7 @@ export function buildLivePreviewExtension(getSettings: () => ReturnHeadingsSetti
 					const text = line.text.trim();
 
 					const headingMatch = text.match(/^(#{1,6}) /);
-					if (headingMatch && headingMatch[1]) {
+					if (headingMatch?.[1]) {
 						currentDepth = headingMatch[1].length;
 						continue;
 					}
@@ -73,7 +107,12 @@ export function buildLivePreviewExtension(getSettings: () => ReturnHeadingsSetti
 					if (!marker) continue;
 
 					if (cursorLines.has(i)) {
-						builder.add(line.from, line.from, Decoration.line({ class: 'heading-return-marker-editing' }));
+						// Cursor on this line: keep raw text, apply a faint style class.
+						builder.add(
+							line.from,
+							line.from,
+							Decoration.line({ class: 'heading-return-marker-editing' }),
+						);
 						continue;
 					}
 
@@ -90,7 +129,12 @@ export function buildLivePreviewExtension(getSettings: () => ReturnHeadingsSetti
 							Decoration.replace({ widget: new ReturnMarkerWidget(label, invalid) }),
 						);
 					} else {
-						builder.add(line.from, line.from, Decoration.line({ class: 'heading-return-marker-raw' }));
+						// Subtle mode off: keep raw text but dim the line.
+						builder.add(
+							line.from,
+							line.from,
+							Decoration.line({ class: 'heading-return-marker-raw' }),
+						);
 					}
 				}
 

@@ -1,47 +1,47 @@
-import { EditorView, showPanel, type Panel } from '@codemirror/view';
-import { parseMarker, resolveDepth } from './parser';
-import type { ReturnHeadingsSettings } from './settings';
+/**
+ * Sticky heading breadcrumb bar — CM6 `showPanel` extension.
+ *
+ * Adds a panel at the top of the editor (above the scroller content, natively
+ * managed by CM6) that shows the virtual heading context at the current scroll
+ * position as a clickable breadcrumb trail.
+ *
+ * **What makes this different from obsidian-sticky-headings:**
+ * The context is derived from `findContextAtBoundaries()` which resolves
+ * heading-return markers (`---h2`, `---h-1`) as well as real headings. Scrolling
+ * past a return marker correctly updates the breadcrumb to reflect structural
+ * re-entry — something `metadataCache.headings` cannot express.
+ *
+ * **Performance approach (borrowed from obsidian-floating-toc-plugin):**
+ * Boundaries are precomputed O(n) on `docChanged` and searched O(log n) on
+ * every scroll frame, instead of scanning the document on each frame.
+ */
 
-export interface HeadingEntry {
-	level: number;
-	text: string;
-	line: number; // 0-indexed
-}
+import { EditorView, showPanel, type Panel } from '@codemirror/view';
+import type { ReturnHeadingsSettings } from './settings';
+import {
+	type HeadingBoundary,
+	type HeadingEntry,
+	computeHeadingBoundaries,
+	findContextAtBoundaries,
+	getFirstVisibleLineNum,
+} from './utils';
+
+// Re-export so callers that previously imported HeadingEntry from here still work.
+export type { HeadingEntry };
+
+// ── Bar renderer ─────────────────────────────────────────────────────────────
 
 /**
- * Walks document content from line 0 through targetLine, applying both real
- * headings and return markers to maintain a virtual heading stack.
- * Returns the resolved stack at that position.
+ * Rebuilds the breadcrumb DOM inside `dom` for the given virtual heading
+ * context. Each item is a clickable span that moves the cursor to the
+ * corresponding heading and scrolls it into view.
  */
-export function getContextAtLine(content: string, targetLine: number): HeadingEntry[] {
-	const lines = content.split('\n');
-	const stack: HeadingEntry[] = [];
-	const limit = Math.min(targetLine, lines.length - 1);
-
-	for (let i = 0; i <= limit; i++) {
-		const trimmed = (lines[i] ?? '').trim();
-
-		const headingMatch = trimmed.match(/^(#{1,6}) (.+)/);
-		if (headingMatch) {
-			const level = headingMatch[1]!.length;
-			const text = headingMatch[2]!.trim();
-			while (stack.length > 0 && stack[stack.length - 1]!.level >= level) stack.pop();
-			stack.push({ level, text, line: i });
-			continue;
-		}
-
-		const marker = parseMarker(trimmed);
-		if (marker) {
-			const currentLevel = stack.length > 0 ? stack[stack.length - 1]!.level : 0;
-			const targetLevel = resolveDepth(marker, currentLevel);
-			while (stack.length > 0 && stack[stack.length - 1]!.level > targetLevel) stack.pop();
-		}
-	}
-
-	return stack;
-}
-
-function renderBar(dom: HTMLElement, view: EditorView, settings: ReturnHeadingsSettings): void {
+function renderBar(
+	dom: HTMLElement,
+	view: EditorView,
+	boundaries: HeadingBoundary[],
+	settings: ReturnHeadingsSettings,
+): void {
 	if (!settings.stickyHeadingsEnabled) {
 		dom.style.display = 'none';
 		return;
@@ -49,30 +49,19 @@ function renderBar(dom: HTMLElement, view: EditorView, settings: ReturnHeadingsS
 
 	const scrollTop = view.scrollDOM.scrollTop;
 
-	// Nothing scrolled yet — bar would only duplicate what's already visible
+	// At the very top there is nothing to summarise — the heading is already visible.
 	if (scrollTop < 1) {
 		dom.style.display = 'none';
 		return;
 	}
 
-	let lineNum: number;
-	try {
-		const block = view.lineBlockAtHeight(scrollTop);
-		lineNum = view.state.doc.lineAt(block.from).number - 1; // convert to 0-indexed
-	} catch {
+	const lineNum = getFirstVisibleLineNum(view);
+	if (lineNum === null || lineNum < 1) {
 		dom.style.display = 'none';
 		return;
 	}
 
-	if (lineNum < 1) {
-		dom.style.display = 'none';
-		return;
-	}
-
-	// Slice doc only up to the current line — avoids scanning the full doc on every scroll
-	const clampedLine = Math.min(lineNum + 1, view.state.doc.lines);
-	const upToHere = view.state.sliceDoc(0, view.state.doc.line(clampedLine).to);
-	const context = getContextAtLine(upToHere, lineNum);
+	const context = findContextAtBoundaries(boundaries, lineNum);
 
 	dom.empty();
 
@@ -94,6 +83,7 @@ function renderBar(dom: HTMLElement, view: EditorView, settings: ReturnHeadingsS
 			cls: `rh-sticky-item rh-sticky-level-${entry.level}${isLast ? ' rh-sticky-current' : ''}`,
 		});
 
+		// Capture line number so the click handler stays correct after re-renders.
 		const targetLineIdx = entry.line;
 		item.addEventListener('click', () => {
 			const cmLine = view.state.doc.line(
@@ -107,18 +97,37 @@ function renderBar(dom: HTMLElement, view: EditorView, settings: ReturnHeadingsS
 	});
 }
 
+// ── Extension ────────────────────────────────────────────────────────────────
+
+/**
+ * Builds the CM6 `showPanel` extension that renders the sticky breadcrumb bar.
+ *
+ * The panel registers a direct scroll event listener on `view.scrollDOM` for
+ * responsive updates (rAF-throttled), and also rebuilds on `docChanged` and
+ * `geometryChanged` via the `update` callback.
+ *
+ * Boundaries are recomputed only when the document changes (`docChanged`), not
+ * on every scroll event, keeping scroll-frame work to O(log n).
+ *
+ * @param getSettings - Accessor for the current plugin settings.
+ */
 export function buildStickyBarExtension(getSettings: () => ReturnHeadingsSettings) {
 	return showPanel.of((view: EditorView): Panel => {
 		const dom = document.createElement('div');
 		dom.className = 'rh-sticky-bar';
 		dom.style.display = 'none';
 
+		// Boundaries are cached and refreshed only on doc change.
+		let boundaries: HeadingBoundary[] = computeHeadingBoundaries(
+			view.state.doc.toString(),
+		);
+
 		let pending = false;
 		const onScroll = () => {
 			if (pending) return;
 			pending = true;
 			requestAnimationFrame(() => {
-				renderBar(dom, view, getSettings());
+				renderBar(dom, view, boundaries, getSettings());
 				pending = false;
 			});
 		};
@@ -129,8 +138,12 @@ export function buildStickyBarExtension(getSettings: () => ReturnHeadingsSetting
 			dom,
 			top: true,
 			update(update) {
+				if (update.docChanged) {
+					// Recompute boundaries only when content changes.
+					boundaries = computeHeadingBoundaries(update.view.state.doc.toString());
+				}
 				if (update.docChanged || update.geometryChanged) {
-					renderBar(dom, update.view, getSettings());
+					renderBar(dom, update.view, boundaries, getSettings());
 				}
 			},
 			destroy() {

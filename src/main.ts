@@ -1,4 +1,23 @@
-import { Editor, MarkdownView, Plugin } from 'obsidian';
+/**
+ * Return Headings — main plugin entry point.
+ *
+ * Wires together all sub-systems:
+ *   - Live Preview decorations (CM6 ViewPlugin)
+ *   - Sticky heading breadcrumb bar (CM6 showPanel)
+ *   - Reading View post-processor
+ *   - Semantic Outline side pane (custom ItemView)
+ *   - Floating TOC panels (one per open MarkdownView leaf)
+ *   - Insertion commands and toggle commands
+ *   - Settings tab
+ *
+ * **Floating TOC lifecycle (multi-leaf, inspired by obsidian-floating-toc-plugin):**
+ * A `Map<WorkspaceLeaf, FloatingTocPanel>` tracks one panel per open Markdown
+ * leaf. `syncFloatingTocPanels()` is called on `active-leaf-change` and
+ * `layout-change` to create panels for new leaves and destroy panels for
+ * closed ones — matching the approach used by the source plugin.
+ */
+
+import { Editor, MarkdownView, Plugin, WorkspaceLeaf } from 'obsidian';
 import { DEFAULT_SETTINGS, ReturnHeadingsSettingTab, type ReturnHeadingsSettings } from './settings';
 import { buildLivePreviewExtension } from './live-preview';
 import { buildReadingViewProcessor } from './reading-view';
@@ -8,47 +27,65 @@ import { FloatingTocPanel } from './floating-toc';
 
 export default class ReturnHeadingsPlugin extends Plugin {
 	settings!: ReturnHeadingsSettings;
-	private floatingToc: FloatingTocPanel | null = null;
+
+	/**
+	 * One floating TOC panel per open Markdown leaf. Synced on leaf changes
+	 * and layout changes via `syncFloatingTocPanels()`.
+	 */
+	private tocPanels = new Map<WorkspaceLeaf, FloatingTocPanel>();
 
 	async onload() {
 		await this.loadSettings();
 
-		// Reading View post-processor
+		// ── Reading View ────────────────────────────────────────────────────
 		this.registerMarkdownPostProcessor(buildReadingViewProcessor(() => this.settings));
 
-		// Live Preview decorations + sticky breadcrumb bar (CM6 extensions)
+		// ── Live Preview + sticky bar (CM6 extensions) ──────────────────────
 		this.registerEditorExtension([
 			buildLivePreviewExtension(() => this.settings),
 			buildStickyBarExtension(() => this.settings),
 		]);
 
-		// Semantic Outline side pane
+		// ── Semantic Outline pane ───────────────────────────────────────────
 		this.registerView(VIEW_TYPE_OUTLINE, leaf => new ReturnHeadingsOutlineView(leaf, this));
 
 		this.addRibbonIcon('list-tree', 'Return Headings outline', () => {
 			this.activateOutlineView();
 		});
 
-		// Refresh outline + floating TOC on file switch or edit
+		// ── Workspace events ────────────────────────────────────────────────
+
 		this.registerEvent(
 			this.app.workspace.on('active-leaf-change', () => {
 				this.refreshOutlineView();
-				this.reattachFloatingToc();
+				this.syncFloatingTocPanels();
 			}),
 		);
+
+		// layout-change fires when panes open or close, allowing us to attach
+		// panels to new leaves and clean up panels for closed ones.
+		this.registerEvent(
+			this.app.workspace.on('layout-change', () => {
+				this.syncFloatingTocPanels();
+			}),
+		);
+
 		this.registerEvent(
 			this.app.workspace.on('editor-change', () => {
 				this.refreshOutlineView();
-				this.floatingToc?.refresh();
+				// Refresh only the panel for the leaf that just changed.
+				const active = this.app.workspace.activeLeaf;
+				if (active) this.tocPanels.get(active)?.refresh();
 			}),
 		);
 
-		// Attach floating TOC for the initial active view
-		this.reattachFloatingToc();
+		// Attach panels for any leaves already open at load time.
+		this.syncFloatingTocPanels();
 
+		// ── Settings ────────────────────────────────────────────────────────
 		this.addSettingTab(new ReturnHeadingsSettingTab(this.app, this));
 
-		// ── Insertion commands ──────────────────────────────────────────────────
+		// ── Insertion commands ───────────────────────────────────────────────
 
 		for (let level = 1; level <= 6; level++) {
 			this.addCommand({
@@ -66,7 +103,7 @@ export default class ReturnHeadingsPlugin extends Plugin {
 			});
 		}
 
-		// ── View commands ───────────────────────────────────────────────────────
+		// ── View toggle commands ─────────────────────────────────────────────
 
 		this.addCommand({
 			id: 'toggle-marker-visibility',
@@ -95,7 +132,7 @@ export default class ReturnHeadingsPlugin extends Plugin {
 			callback: async () => {
 				this.settings.floatingTocEnabled = !this.settings.floatingTocEnabled;
 				await this.saveSettings();
-				this.reattachFloatingToc();
+				this.syncFloatingTocPanels();
 			},
 		});
 
@@ -107,7 +144,8 @@ export default class ReturnHeadingsPlugin extends Plugin {
 	}
 
 	onunload() {
-		this.floatingToc?.detach();
+		for (const panel of this.tocPanels.values()) panel.detach();
+		this.tocPanels.clear();
 		this.app.workspace.detachLeavesOfType(VIEW_TYPE_OUTLINE);
 	}
 
@@ -123,14 +161,51 @@ export default class ReturnHeadingsPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	/** Called when the active leaf changes or the setting is toggled. */
+	/**
+	 * Synchronises the floating TOC panel map with the current set of open
+	 * Markdown leaves. Creates panels for new leaves, destroys panels for
+	 * closed ones.
+	 *
+	 * Also called from the `floatingTocEnabled` setting toggle to
+	 * immediately attach or detach all panels.
+	 */
 	reattachFloatingToc() {
-		this.floatingToc?.detach();
-		this.floatingToc = null;
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (view) {
-			this.floatingToc = new FloatingTocPanel(view, () => this.settings);
-			this.floatingToc.attach();
+		this.syncFloatingTocPanels();
+	}
+
+	// ── Private ───────────────────────────────────────────────────────────────
+
+	private syncFloatingTocPanels() {
+		if (!this.settings.floatingTocEnabled) {
+			for (const panel of this.tocPanels.values()) panel.detach();
+			this.tocPanels.clear();
+			return;
+		}
+
+		// Collect all currently open Markdown leaves.
+		const openLeaves = new Set<WorkspaceLeaf>();
+		this.app.workspace.iterateAllLeaves(leaf => {
+			if (leaf.view instanceof MarkdownView) openLeaves.add(leaf);
+		});
+
+		// Detach panels for leaves that have since closed.
+		for (const [leaf, panel] of this.tocPanels) {
+			if (!openLeaves.has(leaf)) {
+				panel.detach();
+				this.tocPanels.delete(leaf);
+			}
+		}
+
+		// Attach panels for newly opened leaves.
+		for (const leaf of openLeaves) {
+			if (!this.tocPanels.has(leaf)) {
+				const panel = new FloatingTocPanel(
+					leaf.view as MarkdownView,
+					() => this.settings,
+				);
+				panel.attach();
+				this.tocPanels.set(leaf, panel);
+			}
 		}
 	}
 
@@ -154,6 +229,12 @@ export default class ReturnHeadingsPlugin extends Plugin {
 	}
 }
 
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+/**
+ * Inserts a marker line at (or after) the current cursor position.
+ * If the current line is blank, replaces it; otherwise appends on a new line.
+ */
 function insertMarker(editor: Editor, marker: string) {
 	const cursor = editor.getCursor();
 	const currentLine = editor.getLine(cursor.line);
