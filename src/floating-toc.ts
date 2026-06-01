@@ -96,15 +96,24 @@ export class FloatingTocPanel {
 		const settings = this.getSettings();
 		if (!settings.floatingTocEnabled) return;
 
+		// Try standard view elements first; fall back to .view-content so the
+		// TOC still mounts when third-party plugins modify the view DOM.
 		const anchor =
 			this.mdView.containerEl.querySelector<HTMLElement>('.markdown-source-view') ??
-			this.mdView.containerEl.querySelector<HTMLElement>('.markdown-reading-view');
-		if (!anchor) return;
+			this.mdView.containerEl.querySelector<HTMLElement>('.markdown-reading-view') ??
+			this.mdView.containerEl.querySelector<HTMLElement>('.view-content');
+
+		const host = anchor?.parentElement ?? this.mdView.containerEl;
+		(host as HTMLElement).style.position = 'relative';
 
 		// Apply position and mode classes before inserting so CSS takes effect immediately.
 		this.applyPositionClasses();
 
-		anchor.insertAdjacentElement('beforebegin', this.container);
+		if (anchor && anchor.parentElement === host) {
+			anchor.insertAdjacentElement('beforebegin', this.container);
+		} else {
+			host.appendChild(this.container);
+		}
 		this.buildContent();
 
 		this.scrollEl = this.mdView.containerEl.querySelector<HTMLElement>('.cm-scroller');

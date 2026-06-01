@@ -84,7 +84,12 @@ function renderEditorBar(
 		return;
 	}
 
-	const context = findContextAtBoundaries(boundaries, lineNum);
+	const rawContext = findContextAtBoundaries(boundaries, lineNum);
+	// Filter out heading levels shallower than the configured minimum.
+	const context = settings.stickyHeadingsMinLevel > 1
+		? rawContext.filter(e => e.level >= settings.stickyHeadingsMinLevel)
+		: rawContext;
+
 	if (context.length === 0) {
 		bar.style.display = 'none';
 		return;
@@ -262,15 +267,18 @@ export class ReadingViewStickyBar {
 		const barBottom =
 			this.previewEl.getBoundingClientRect().top + (this.bar.offsetHeight || 0) + 2;
 
-		const stack: { level: number; text: string; el: HTMLElement }[] = [];
+		const rawStack: { level: number; text: string; el: HTMLElement }[] = [];
 
 		for (const h of headingEls) {
 			if (h.getBoundingClientRect().bottom > barBottom) break;
 			const level = parseInt(h.tagName[1]!);
 			const text = h.textContent?.trim() ?? '';
-			while (stack.length > 0 && stack[stack.length - 1]!.level >= level) stack.pop();
-			stack.push({ level, text, el: h });
+			while (rawStack.length > 0 && rawStack[rawStack.length - 1]!.level >= level) rawStack.pop();
+			rawStack.push({ level, text, el: h });
 		}
+
+		const minLevel = settings.stickyHeadingsMinLevel ?? 1;
+		const stack = minLevel > 1 ? rawStack.filter(e => e.level >= minLevel) : rawStack;
 
 		if (stack.length === 0) {
 			this.bar.style.display = 'none';

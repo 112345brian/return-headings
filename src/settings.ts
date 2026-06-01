@@ -11,6 +11,11 @@ export interface ReturnHeadingsSettings {
 	warnOnInvalidReturn: boolean;
 	stickyHeadingsEnabled: boolean;
 	floatingTocEnabled: boolean;
+	/**
+	 * Heading levels shallower than this are suppressed from the sticky bar.
+	 * 1 = show all levels, 2 = hide H1, 3 = hide H1 and H2, etc.
+	 */
+	stickyHeadingsMinLevel: number;
 	/** Which edge of the editor the TOC panel anchors to. */
 	floatingTocPosition: FloatingTocPosition;
 	/**
@@ -26,6 +31,7 @@ export const DEFAULT_SETTINGS: ReturnHeadingsSettings = {
 	validateImpossibleReturns: true,
 	warnOnInvalidReturn: true,
 	stickyHeadingsEnabled: true,
+	stickyHeadingsMinLevel: 1,
 	floatingTocEnabled: true,
 	floatingTocPosition: 'right',
 	floatingTocMode: 'floating',
@@ -106,6 +112,27 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 					this.plugin.settings.stickyHeadingsEnabled = v;
 					await this.plugin.saveSettings();
 				}),
+			);
+
+		new Setting(containerEl)
+			.setName('Shallowest heading in sticky bar')
+			.setDesc(
+				'Heading levels shallower than this are hidden. ' +
+				'Set to H2 to suppress H1 (the note title), H3 to suppress H1 and H2, etc.',
+			)
+			.addDropdown(d =>
+				d
+					.addOption('1', 'H1 — show all')
+					.addOption('2', 'H2 — hide H1')
+					.addOption('3', 'H3 — hide H1, H2')
+					.addOption('4', 'H4 — hide H1–H3')
+					.addOption('5', 'H5 — hide H1–H4')
+					.addOption('6', 'H6 — hide H1–H5')
+					.setValue(String(this.plugin.settings.stickyHeadingsMinLevel))
+					.onChange(async v => {
+						this.plugin.settings.stickyHeadingsMinLevel = parseInt(v);
+						await this.plugin.saveSettings();
+					}),
 			);
 
 		new Setting(containerEl)

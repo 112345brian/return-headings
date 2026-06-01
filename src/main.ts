@@ -29,7 +29,7 @@ export default class ReturnHeadingsPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		this.registerMarkdownPostProcessor(buildReadingViewProcessor(() => this.settings));
+		this.registerMarkdownPostProcessor(buildReadingViewProcessor(this.app, () => this.settings));
 
 		this.registerEditorExtension([
 			buildLivePreviewExtension(() => this.settings),
