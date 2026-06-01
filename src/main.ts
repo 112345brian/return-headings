@@ -4,9 +4,11 @@ import { buildLivePreviewExtension } from './live-preview';
 import { buildReadingViewProcessor } from './reading-view';
 import { ReturnHeadingsOutlineView, VIEW_TYPE_OUTLINE } from './outline-view';
 import { buildStickyBarExtension } from './sticky-headings';
+import { FloatingTocPanel } from './floating-toc';
 
 export default class ReturnHeadingsPlugin extends Plugin {
 	settings!: ReturnHeadingsSettings;
+	private floatingToc: FloatingTocPanel | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -14,7 +16,7 @@ export default class ReturnHeadingsPlugin extends Plugin {
 		// Reading View post-processor
 		this.registerMarkdownPostProcessor(buildReadingViewProcessor(() => this.settings));
 
-		// Live Preview decorations + sticky breadcrumb bar
+		// Live Preview decorations + sticky breadcrumb bar (CM6 extensions)
 		this.registerEditorExtension([
 			buildLivePreviewExtension(() => this.settings),
 			buildStickyBarExtension(() => this.settings),
@@ -27,13 +29,22 @@ export default class ReturnHeadingsPlugin extends Plugin {
 			this.activateOutlineView();
 		});
 
-		// Refresh outline on file switch or edit
+		// Refresh outline + floating TOC on file switch or edit
 		this.registerEvent(
-			this.app.workspace.on('active-leaf-change', () => this.refreshOutlineView()),
+			this.app.workspace.on('active-leaf-change', () => {
+				this.refreshOutlineView();
+				this.reattachFloatingToc();
+			}),
 		);
 		this.registerEvent(
-			this.app.workspace.on('editor-change', () => this.refreshOutlineView()),
+			this.app.workspace.on('editor-change', () => {
+				this.refreshOutlineView();
+				this.floatingToc?.refresh();
+			}),
 		);
+
+		// Attach floating TOC for the initial active view
+		this.reattachFloatingToc();
 
 		this.addSettingTab(new ReturnHeadingsSettingTab(this.app, this));
 
@@ -79,6 +90,16 @@ export default class ReturnHeadingsPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: 'toggle-floating-toc',
+			name: 'Toggle floating TOC',
+			callback: async () => {
+				this.settings.floatingTocEnabled = !this.settings.floatingTocEnabled;
+				await this.saveSettings();
+				this.reattachFloatingToc();
+			},
+		});
+
+		this.addCommand({
 			id: 'open-outline',
 			name: 'Open Return Headings outline',
 			callback: () => this.activateOutlineView(),
@@ -86,6 +107,7 @@ export default class ReturnHeadingsPlugin extends Plugin {
 	}
 
 	onunload() {
+		this.floatingToc?.detach();
 		this.app.workspace.detachLeavesOfType(VIEW_TYPE_OUTLINE);
 	}
 
@@ -99,6 +121,17 @@ export default class ReturnHeadingsPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+	}
+
+	/** Called when the active leaf changes or the setting is toggled. */
+	reattachFloatingToc() {
+		this.floatingToc?.detach();
+		this.floatingToc = null;
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (view) {
+			this.floatingToc = new FloatingTocPanel(view, () => this.settings);
+			this.floatingToc.attach();
+		}
 	}
 
 	private refreshOutlineView() {

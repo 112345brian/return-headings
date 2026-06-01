@@ -7,6 +7,7 @@ export interface ReturnHeadingsSettings {
 	validateImpossibleReturns: boolean;
 	warnOnInvalidReturn: boolean;
 	stickyHeadingsEnabled: boolean;
+	floatingTocEnabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: ReturnHeadingsSettings = {
@@ -15,6 +16,7 @@ export const DEFAULT_SETTINGS: ReturnHeadingsSettings = {
 	validateImpossibleReturns: true,
 	warnOnInvalidReturn: true,
 	stickyHeadingsEnabled: true,
+	floatingTocEnabled: true,
 };
 
 export class ReturnHeadingsSettingTab extends PluginSettingTab {
@@ -29,6 +31,8 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 		containerEl.createEl('h2', { text: 'Return Headings' });
+
+		// ── Marker display ─────────────────────────────────────────────────────
 
 		containerEl.createEl('h3', { text: 'Marker display' });
 
@@ -52,6 +56,8 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 				}),
 			);
 
+		// ── Validation ─────────────────────────────────────────────────────────
+
 		containerEl.createEl('h3', { text: 'Validation' });
 
 		new Setting(containerEl)
@@ -74,17 +80,32 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 				}),
 			);
 
-		containerEl.createEl('h3', { text: 'Sticky heading bar' });
+		// ── Navigation ─────────────────────────────────────────────────────────
+
+		containerEl.createEl('h3', { text: 'Navigation' });
 
 		new Setting(containerEl)
-			.setName('Show sticky heading bar')
+			.setName('Sticky heading bar')
 			.setDesc(
-				'Display a breadcrumb bar at the top of the editor showing your current virtual heading context as you scroll. Return markers are reflected in the breadcrumb.',
+				'Show a breadcrumb bar at the top of the editor reflecting your virtual heading context as you scroll.',
 			)
 			.addToggle(t =>
 				t.setValue(this.plugin.settings.stickyHeadingsEnabled).onChange(async v => {
 					this.plugin.settings.stickyHeadingsEnabled = v;
 					await this.plugin.saveSettings();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName('Floating TOC')
+			.setDesc(
+				'Show a floating table of contents panel on the right edge of the editor. Hover to expand; pin to keep open. Return markers appear as structural nodes, and the current heading is highlighted as you scroll.',
+			)
+			.addToggle(t =>
+				t.setValue(this.plugin.settings.floatingTocEnabled).onChange(async v => {
+					this.plugin.settings.floatingTocEnabled = v;
+					await this.plugin.saveSettings();
+					this.plugin.reattachFloatingToc();
 				}),
 			);
 	}
