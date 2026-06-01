@@ -1,92 +1,98 @@
-# Obsidian Sample Plugin
+# Return Headings
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+An Obsidian plugin that introduces lightweight structural markers for re-entering a previous heading depth without creating a duplicate visible heading.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+## Syntax
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
+**Absolute return** — jump to a specific heading level:
 
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open modal (simple)" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and outputs a Notice on click.
-- Registers a global interval which logs 'setInterval' to the console.
-
-## First time developing plugins?
-
-Quick starting guide for new plugin devs:
-
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `src/main.ts` to `main.js`.
-- Make changes to `src/main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
-
-## Releasing new releases
-
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
-
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
-
-## Adding your plugin to the community plugin list
-
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
-
-## How to use
-
-- Clone this repo.
-- Make sure your NodeJS is at least v18 (`node --version`).
-- `npm i` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
-
-## Manually installing the plugin
-
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
-
-## Improve code quality with eslint
-
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code.
-- This project already has eslint preconfigured, you can invoke a check by running`npm run lint`
-- Together with a custom eslint [plugin](https://github.com/obsidianmd/eslint-plugin) for Obsidan specific code guidelines.
-- A GitHub action is preconfigured to automatically lint every commit on all branches.
-
-## Funding URL
-
-You can include funding URLs where people who use your plugin can financially support it.
-
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
-
-```json
-{
-	"fundingUrl": "https://buymeacoffee.com"
-}
+```
+---h2
+---h3
 ```
 
-If you have multiple URLs, you can also do:
+**Relative return** — move up N heading levels:
 
-```json
-{
-	"fundingUrl": {
-		"Buy Me a Coffee": "https://buymeacoffee.com",
-		"GitHub Sponsor": "https://github.com/sponsors",
-		"Patreon": "https://www.patreon.com/"
-	}
-}
+```
+---h-1
+---h-2
 ```
 
-## API Documentation
+Example:
 
-See https://docs.obsidian.md
+```markdown
+## Kant
+### Space
+Notes about space.
+### Time
+Notes about time.
+## Hegel
+Notes about Hegel.
+---h2
+### Space
+More notes about space, resumed under Hegel rather than as a new top-level section.
+```
+
+## What this version does
+
+v0.1 is a **syntax and decoration plugin**. It:
+
+- Parses `---hN` and `---h-N` marker lines
+- Hides markers in Reading View (or shows a faint `↩ H2` label)
+- Replaces markers with a styled label in Live Preview while the cursor is elsewhere; shows raw syntax when editing the line
+- Highlights invalid markers (e.g. `---h7`, or `---h-5` inside an H2) in red when validation is enabled
+- Adds commands to insert any marker from the command palette
+
+**What v0.1 does not do:** it does not alter Obsidian's heading structure, metadata cache, native outline pane, folding, backlinks, or export. Paragraphs after a return marker are not yet semantically re-parented in any Obsidian-native sense. The markers are notation only — visual and validated, but not yet structurally operative.
+
+## Roadmap
+
+| Version | Focus |
+|---------|-------|
+| **0.1** | Marker UX — parse, decorate, hide/show, commands, validation |
+| **0.2** | Semantic Outline — custom side pane with virtual heading stack, click-to-jump, parent-return relationships |
+| **0.3** | Refactor tools — convert repeated identical headings into return markers, normalize absolute/relative, validate entire file |
+| **0.4** | Export support — transform markers for HTML/PDF/Pandoc output |
+
+## Installation
+
+Build from source:
+
+```bash
+npm install
+npm run build
+```
+
+Copy `main.js`, `styles.css`, and `manifest.json` to:
+
+```
+YourVault/.obsidian/plugins/return-headings/
+```
+
+Then enable the plugin in Obsidian settings.
+
+## Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Hide markers in Reading View | on | Markers are invisible when reading |
+| Show subtle markers in Live Preview | on | Replace raw syntax with `↩ H2` label while cursor is elsewhere |
+| Validate impossible returns | on | Track heading depth and flag unresolvable markers |
+| Warn on invalid returns | on | Highlight out-of-range markers in red |
+
+## Commands
+
+All commands are available in the command palette (`Ctrl/Cmd+P`):
+
+- **Insert return to H1–H6** — absolute return markers
+- **Insert return up 1–3 headings** — relative return markers
+- **Toggle visibility of return markers** — flip hide/show across both Reading View and Live Preview
+
+## Development
+
+```bash
+npm install
+npm run dev    # watch mode
+npm run build  # production build
+npm run lint   # ESLint
+```

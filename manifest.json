@@ -3,7 +3,7 @@
 	"name": "Return Headings",
 	"version": "0.1.0",
 	"minAppVersion": "1.0.0",
-	"description": "Lightweight structural markers for returning to a previous heading depth without creating duplicate headings.",
+	"description": "Visual notation for heading-return markers (---h2, ---h-1). Parses, decorates, and validates markers. Semantic outline support planned for v0.2.",
 	"author": "112345brian",
 	"authorUrl": "https://github.com/112345brian",
 	"isDesktopOnly": false
