@@ -1,5 +1,8 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, DropdownComponent, PluginSettingTab, Setting } from 'obsidian';
 import type ReturnHeadingsPlugin from './main';
+
+export type FloatingTocPosition = 'left' | 'right';
+export type FloatingTocMode = 'floating' | 'pinned';
 
 export interface ReturnHeadingsSettings {
 	hideMarkersInReadingView: boolean;
@@ -8,6 +11,13 @@ export interface ReturnHeadingsSettings {
 	warnOnInvalidReturn: boolean;
 	stickyHeadingsEnabled: boolean;
 	floatingTocEnabled: boolean;
+	/** Which edge of the editor the TOC panel anchors to. */
+	floatingTocPosition: FloatingTocPosition;
+	/**
+	 * `floating` — collapsed to an indicator strip; expands on hover.
+	 * `pinned`   — always expanded at full width.
+	 */
+	floatingTocMode: FloatingTocMode;
 }
 
 export const DEFAULT_SETTINGS: ReturnHeadingsSettings = {
@@ -17,6 +27,8 @@ export const DEFAULT_SETTINGS: ReturnHeadingsSettings = {
 	warnOnInvalidReturn: true,
 	stickyHeadingsEnabled: true,
 	floatingTocEnabled: true,
+	floatingTocPosition: 'right',
+	floatingTocMode: 'floating',
 };
 
 export class ReturnHeadingsSettingTab extends PluginSettingTab {
@@ -87,7 +99,7 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Sticky heading bar')
 			.setDesc(
-				'Show a breadcrumb bar at the top of the editor reflecting your virtual heading context as you scroll.',
+				'Show a VS Code-style sticky context bar at the top of the editor. Stacks one line per heading level; content scrolls underneath it.',
 			)
 			.addToggle(t =>
 				t.setValue(this.plugin.settings.stickyHeadingsEnabled).onChange(async v => {
@@ -98,15 +110,46 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Floating TOC')
-			.setDesc(
-				'Show a floating table of contents panel on the right edge of the editor. Hover to expand; pin to keep open. Return markers appear as structural nodes, and the current heading is highlighted as you scroll.',
-			)
+			.setDesc('Show a table of contents panel on the edge of the editor.')
 			.addToggle(t =>
 				t.setValue(this.plugin.settings.floatingTocEnabled).onChange(async v => {
 					this.plugin.settings.floatingTocEnabled = v;
 					await this.plugin.saveSettings();
 					this.plugin.reattachFloatingToc();
 				}),
+			);
+
+		new Setting(containerEl)
+			.setName('TOC position')
+			.setDesc('Which edge of the editor the TOC panel anchors to.')
+			.addDropdown((d: DropdownComponent) =>
+				d
+					.addOption('right', 'Right')
+					.addOption('left', 'Left')
+					.setValue(this.plugin.settings.floatingTocPosition)
+					.onChange(async v => {
+						this.plugin.settings.floatingTocPosition = v as FloatingTocPosition;
+						await this.plugin.saveSettings();
+						this.plugin.reattachFloatingToc();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName('TOC mode')
+			.setDesc(
+				'Floating: collapsed to a thin indicator strip, expands on hover. ' +
+				'Pinned: always expanded at full width.',
+			)
+			.addDropdown((d: DropdownComponent) =>
+				d
+					.addOption('floating', 'Floating (hover to expand)')
+					.addOption('pinned', 'Pinned (always visible)')
+					.setValue(this.plugin.settings.floatingTocMode)
+					.onChange(async v => {
+						this.plugin.settings.floatingTocMode = v as FloatingTocMode;
+						await this.plugin.saveSettings();
+						this.plugin.reattachFloatingToc();
+					}),
 			);
 	}
 }

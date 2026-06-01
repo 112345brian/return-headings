@@ -93,12 +93,16 @@ export class FloatingTocPanel {
 	 * Does nothing if `floatingTocEnabled` is false in settings.
 	 */
 	attach(): void {
-		if (!this.getSettings().floatingTocEnabled) return;
+		const settings = this.getSettings();
+		if (!settings.floatingTocEnabled) return;
 
 		const anchor =
 			this.mdView.containerEl.querySelector<HTMLElement>('.markdown-source-view') ??
 			this.mdView.containerEl.querySelector<HTMLElement>('.markdown-reading-view');
 		if (!anchor) return;
+
+		// Apply position and mode classes before inserting so CSS takes effect immediately.
+		this.applyPositionClasses();
 
 		anchor.insertAdjacentElement('beforebegin', this.container);
 		this.buildContent();
@@ -140,19 +144,34 @@ export class FloatingTocPanel {
 
 	// ── Private ───────────────────────────────────────────────────────────────
 
+	/** Syncs position/mode CSS classes from current settings onto the container. */
+	private applyPositionClasses(): void {
+		const settings = this.getSettings();
+		this.container.toggleClass('rh-ftoc-left', settings.floatingTocPosition === 'left');
+		this.container.toggleClass('rh-ftoc-right', settings.floatingTocPosition === 'right');
+
+		// In pinned mode the panel is always fully expanded.
+		this.pinned = settings.floatingTocMode === 'pinned';
+		this.container.toggleClass('rh-ftoc-pinned', this.pinned);
+	}
+
 	private buildContent(): void {
 		const toolbar = this.container.createEl('div', { cls: 'rh-ftoc-toolbar' });
-		const pinBtn = toolbar.createEl('button', {
-			cls: 'rh-ftoc-pin-btn',
-			attr: { title: 'Pin TOC' },
-		});
-		pinBtn.setText('⊕');
-		pinBtn.addEventListener('click', e => {
-			e.stopPropagation();
-			this.pinned = !this.pinned;
-			this.container.toggleClass('rh-ftoc-pinned', this.pinned);
-			pinBtn.setText(this.pinned ? '⊗' : '⊕');
-		});
+
+		// Pin button is only meaningful in floating mode; hide it when pinned-by-default.
+		if (this.getSettings().floatingTocMode === 'floating') {
+			const pinBtn = toolbar.createEl('button', {
+				cls: 'rh-ftoc-pin-btn',
+				attr: { title: 'Pin TOC' },
+			});
+			pinBtn.setText('⊕');
+			pinBtn.addEventListener('click', e => {
+				e.stopPropagation();
+				this.pinned = !this.pinned;
+				this.container.toggleClass('rh-ftoc-pinned', this.pinned);
+				pinBtn.setText(this.pinned ? '⊗' : '⊕');
+			});
+		}
 
 		const content = this.mdView.editor.getValue();
 

@@ -211,20 +211,46 @@
  * Injected as a sibling before .markdown-source-view inside .view-content.
  * .view-content has position:relative in Obsidian, so absolute positioning
  * is relative to the content area (not the whole window).
+ *
+ * Position is controlled by .rh-ftoc-left / .rh-ftoc-right classes applied
+ * from the floatingTocPosition setting.
  */
 .rh-ftoc {
 	position: absolute;
-	right: 0;
 	top: 0;
 	bottom: 0;
 	width: 14px;
 	z-index: 20;
 	overflow: hidden;
-	border-radius: 7px 0 0 7px;
 	transition: width 200ms ease, background-color 200ms ease, box-shadow 200ms ease;
-	/* Don't block editor interactions in the collapsed strip */
 	cursor: default;
 }
+
+/* ── Right edge (default) ───────────────────────────────────────────────────── */
+
+.rh-ftoc.rh-ftoc-right {
+	right: 0;
+	border-radius: 7px 0 0 7px;
+}
+
+.rh-ftoc.rh-ftoc-right:hover,
+.rh-ftoc.rh-ftoc-right.rh-ftoc-pinned {
+	border-radius: 7px 0 0 7px;
+}
+
+/* ── Left edge ──────────────────────────────────────────────────────────────── */
+
+.rh-ftoc.rh-ftoc-left {
+	left: 0;
+	border-radius: 0 7px 7px 0;
+}
+
+.rh-ftoc.rh-ftoc-left:hover,
+.rh-ftoc.rh-ftoc-left.rh-ftoc-pinned {
+	border-radius: 0 7px 7px 0;
+}
+
+/* ── Expanded state (hover or pinned) ───────────────────────────────────────── */
 
 .rh-ftoc:hover,
 .rh-ftoc.rh-ftoc-pinned {
@@ -233,7 +259,11 @@
 	box-shadow: var(--shadow-l);
 	overflow-y: auto;
 	overflow-x: hidden;
-	border-radius: 7px 0 0 7px;
+}
+
+/* In pinned mode the panel is always expanded — remove hover-only treatment. */
+.rh-ftoc.rh-ftoc-pinned {
+	width: 230px;
 }
 
 /* ── Toolbar ────────────────────────────────────────────────────────────────── */
