@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS, ReturnHeadingsSettingTab, type ReturnHeadingsSettings
 import { buildLivePreviewExtension } from './live-preview';
 import { buildReadingViewProcessor } from './reading-view';
 import { ReturnHeadingsOutlineView, VIEW_TYPE_OUTLINE } from './outline-view';
+import { buildStickyBarExtension } from './sticky-headings';
 
 export default class ReturnHeadingsPlugin extends Plugin {
 	settings!: ReturnHeadingsSettings;
@@ -10,13 +11,16 @@ export default class ReturnHeadingsPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		// Reading View
+		// Reading View post-processor
 		this.registerMarkdownPostProcessor(buildReadingViewProcessor(() => this.settings));
 
-		// Live Preview
-		this.registerEditorExtension(buildLivePreviewExtension(() => this.settings));
+		// Live Preview decorations + sticky breadcrumb bar
+		this.registerEditorExtension([
+			buildLivePreviewExtension(() => this.settings),
+			buildStickyBarExtension(() => this.settings),
+		]);
 
-		// Semantic Outline pane
+		// Semantic Outline side pane
 		this.registerView(VIEW_TYPE_OUTLINE, leaf => new ReturnHeadingsOutlineView(leaf, this));
 
 		this.addRibbonIcon('list-tree', 'Return Headings outline', () => {
@@ -33,7 +37,8 @@ export default class ReturnHeadingsPlugin extends Plugin {
 
 		this.addSettingTab(new ReturnHeadingsSettingTab(this.app, this));
 
-		// Absolute return commands H1–H6
+		// ── Insertion commands ──────────────────────────────────────────────────
+
 		for (let level = 1; level <= 6; level++) {
 			this.addCommand({
 				id: `insert-return-h${level}`,
@@ -42,7 +47,6 @@ export default class ReturnHeadingsPlugin extends Plugin {
 			});
 		}
 
-		// Relative return commands up 1–3
 		for (const steps of [1, 2, 3]) {
 			this.addCommand({
 				id: `insert-return-up-${steps}`,
@@ -51,7 +55,8 @@ export default class ReturnHeadingsPlugin extends Plugin {
 			});
 		}
 
-		// Toggle marker visibility
+		// ── View commands ───────────────────────────────────────────────────────
+
 		this.addCommand({
 			id: 'toggle-marker-visibility',
 			name: 'Toggle visibility of return markers',
@@ -64,7 +69,15 @@ export default class ReturnHeadingsPlugin extends Plugin {
 			},
 		});
 
-		// Open outline command
+		this.addCommand({
+			id: 'toggle-sticky-headings',
+			name: 'Toggle sticky heading bar',
+			callback: async () => {
+				this.settings.stickyHeadingsEnabled = !this.settings.stickyHeadingsEnabled;
+				await this.saveSettings();
+			},
+		});
+
 		this.addCommand({
 			id: 'open-outline',
 			name: 'Open Return Headings outline',

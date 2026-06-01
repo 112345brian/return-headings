@@ -1,6 +1,5 @@
 /* ─── Live Preview ─────────────────────────────────────────────────────────── */
 
-/* Widget shown when cursor is off the marker line */
 .heading-return-marker {
 	opacity: 0.45;
 	font-style: italic;
@@ -15,14 +14,12 @@
 	opacity: 0.8;
 }
 
-/* Line class when cursor is ON the marker line (raw syntax visible) */
 .heading-return-marker-editing {
 	opacity: 0.55;
 	font-style: italic;
 	color: var(--text-muted);
 }
 
-/* Line class when subtle preview is disabled */
 .heading-return-marker-raw {
 	opacity: 0.45;
 	color: var(--text-muted);
@@ -45,6 +42,53 @@
 	user-select: none;
 }
 
+/* ─── Sticky Heading Bar ────────────────────────────────────────────────────── */
+
+.rh-sticky-bar {
+	display: flex;
+	align-items: center;
+	flex-wrap: nowrap;
+	gap: 0;
+	padding: 3px 10px;
+	background: var(--background-primary);
+	border-bottom: 1px solid var(--background-modifier-border);
+	font-size: var(--font-ui-small);
+	line-height: 1.4;
+	min-height: 26px;
+	overflow: hidden;
+}
+
+.rh-sticky-sep {
+	color: var(--text-faint);
+	padding: 0 3px;
+	user-select: none;
+	font-size: 0.8em;
+	flex-shrink: 0;
+}
+
+.rh-sticky-item {
+	cursor: pointer;
+	color: var(--text-muted);
+	white-space: nowrap;
+	max-width: 180px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	padding: 1px 4px;
+	border-radius: var(--radius-s);
+	transition: background 80ms, color 80ms;
+	flex-shrink: 1;
+}
+
+.rh-sticky-item:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+/* The rightmost item is the current heading — highlight it */
+.rh-sticky-item.rh-sticky-current {
+	color: var(--text-normal);
+}
+
 /* ─── Semantic Outline Pane ─────────────────────────────────────────────────── */
 
 .rh-outline {
@@ -65,7 +109,6 @@
 	padding: 0 4px;
 }
 
-/* Children container — each nesting level adds indentation */
 .rh-outline-children {
 	padding-left: 1.1em;
 }
@@ -85,15 +128,13 @@
 	background: var(--background-modifier-hover);
 }
 
-/* Real headings: normal text weight, slight size variation by level */
 .rh-outline-heading > .rh-outline-label {
 	color: var(--text-normal);
 }
 
-.rh-outline-heading > .rh-outline-label[data-level="1"] { font-weight: var(--font-semibold); }
-.rh-outline-heading > .rh-outline-label[data-level="2"] { font-weight: var(--font-medium); }
+.rh-outline-heading > .rh-outline-label[data-level='1'] { font-weight: var(--font-semibold); }
+.rh-outline-heading > .rh-outline-label[data-level='2'] { font-weight: var(--font-medium); }
 
-/* Return marker nodes: muted + italic */
 .rh-outline-return > .rh-outline-label {
 	color: var(--text-muted);
 	font-style: italic;

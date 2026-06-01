@@ -6,6 +6,7 @@ export interface ReturnHeadingsSettings {
 	showSubtleMarkersInLivePreview: boolean;
 	validateImpossibleReturns: boolean;
 	warnOnInvalidReturn: boolean;
+	stickyHeadingsEnabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: ReturnHeadingsSettings = {
@@ -13,6 +14,7 @@ export const DEFAULT_SETTINGS: ReturnHeadingsSettings = {
 	showSubtleMarkersInLivePreview: true,
 	validateImpossibleReturns: true,
 	warnOnInvalidReturn: true,
+	stickyHeadingsEnabled: true,
 };
 
 export class ReturnHeadingsSettingTab extends PluginSettingTab {
@@ -27,6 +29,8 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 		containerEl.createEl('h2', { text: 'Return Headings' });
+
+		containerEl.createEl('h3', { text: 'Marker display' });
 
 		new Setting(containerEl)
 			.setName('Hide markers in Reading View')
@@ -48,6 +52,8 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 				}),
 			);
 
+		containerEl.createEl('h3', { text: 'Validation' });
+
 		new Setting(containerEl)
 			.setName('Validate impossible returns')
 			.setDesc('Track heading depth and flag markers that cannot be resolved.')
@@ -64,6 +70,20 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 			.addToggle(t =>
 				t.setValue(this.plugin.settings.warnOnInvalidReturn).onChange(async v => {
 					this.plugin.settings.warnOnInvalidReturn = v;
+					await this.plugin.saveSettings();
+				}),
+			);
+
+		containerEl.createEl('h3', { text: 'Sticky heading bar' });
+
+		new Setting(containerEl)
+			.setName('Show sticky heading bar')
+			.setDesc(
+				'Display a breadcrumb bar at the top of the editor showing your current virtual heading context as you scroll. Return markers are reflected in the breadcrumb.',
+			)
+			.addToggle(t =>
+				t.setValue(this.plugin.settings.stickyHeadingsEnabled).onChange(async v => {
+					this.plugin.settings.stickyHeadingsEnabled = v;
 					await this.plugin.saveSettings();
 				}),
 			);
