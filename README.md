@@ -245,3 +245,17 @@ npm run lint   # ESLint
 ## License
 
 MIT — same as the sample plugin this was forked from.
+
+---
+
+## My Other Plugins
+
+Like this plugin? I make a few others for Obsidian:
+
+- [**Bread Trail**](https://github.com/112345brian/bread-trail) — enhanced Breadcrumbs navigation
+- [**Breadbake**](https://github.com/112345brian/breadbake) — Breadcrumbs graph configuration
+- [**Citation Suite**](https://github.com/112345brian/bripey-citation-suite) — enhanced citation tools
+- [**Inherit**](https://github.com/112345brian/inherit) — frontmatter property inheritance
+- [**Properties First**](https://github.com/112345brian/obsidian-properties-first) — move properties above the inline title
+
+Want to install them all at once? Check out [**obsidian-setup**](https://github.com/112345brian/obsidian-setup).
