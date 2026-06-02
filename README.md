@@ -258,4 +258,4 @@ Like this plugin? I make a few others for Obsidian:
 - [**Inherit**](https://github.com/112345brian/inherit) — frontmatter property inheritance
 - [**Properties First**](https://github.com/112345brian/obsidian-properties-first) — move properties above the inline title
 
-Want to install them all at once? Check out [**obsidian-setup**](https://github.com/112345brian/obsidian-setup).
+Want to install them all at once? Check out [**bripeys-extremely-opinionated-plugin-suite**](https://github.com/112345brian/bripeys-extremely-opinionated-plugin-suite).
