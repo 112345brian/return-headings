@@ -287,8 +287,10 @@ export class ReturnHeadingsOutlineView extends ItemView {
 				{ from: { line: targetLine, ch: 0 }, to: { line: targetLine, ch: 0 } },
 				true,
 			);
-			// Do NOT call setActiveLeaf here — that would fire active-leaf-change,
-			// which would cause a refresh cycle and could blank the outline.
+			// setActiveLeaf focuses the editor so the scroll takes effect.
+			// active-leaf-change will fire, but refresh() uses lastMdView as a
+			// fallback so the outline tree is preserved.
+			this.app.workspace.setActiveLeaf(mdView.leaf, { focus: true });
 		}
 	}
 
