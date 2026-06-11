@@ -1,3 +1,15 @@
+/* ─── Utility ───────────────────────────────────────────────────────────────── */
+
+.rh-hidden {
+	display: none !important;
+}
+
+/* Applied dynamically to the host element of the floating TOC / sticky bar so
+ * the absolutely-positioned overlays can be anchored correctly. */
+.rh-position-relative {
+	position: relative;
+}
+
 /* ─── Live Preview ─────────────────────────────────────────────────────────── */
 
 .heading-return-marker {
@@ -44,12 +56,9 @@
 
 /* ─── Sticky Heading Bar (VS Code sticky-scroll style) ──────────────────────
  *
- * The bar is injected as position:absolute into .cm-editor so editor content
- * scrolls underneath it — the same strategy VS Code uses. This produces the
- * natural "peek" transition: as the next heading scrolls toward the top of
- * the viewport, it is visible in the content behind the bar before the
- * context updates. No animation code is needed; the scroll itself provides
- * the transition.
+ * The bar is injected as position:absolute into .cm-editor (editor mode) or
+ * .markdown-reading-view (reading mode) so content scrolls underneath it —
+ * the same strategy VS Code uses.
  *
  * Each line shows the raw heading source text ("## Heading name") with
  * level-appropriate colour, matching VS Code's "exact source styling".
@@ -79,7 +88,8 @@
 	padding: 0 var(--file-margins, 2em);
 	height: calc(var(--line-height-normal, 1.5) * 1em + 2px);
 	line-height: var(--line-height-normal, 1.5);
-	background: var(--background-primary);
+	/* Solid opaque background so scrolling content shows through cleanly. */
+	background-color: var(--background-primary);
 	cursor: pointer;
 	pointer-events: auto;
 	overflow: hidden;       /* clip content when line is translated out */
@@ -88,7 +98,14 @@
 }
 
 .rh-sticky-line:hover {
-	background: var(--background-modifier-hover);
+	/* Layer a semi-transparent tint over the solid background rather than
+	 * replacing it — prevents the scrolling content behind from showing through
+	 * and turning the bar translucent. */
+	background-color: var(--background-primary);
+	background-image: linear-gradient(
+		var(--background-modifier-hover),
+		var(--background-modifier-hover)
+	);
 }
 
 /* Separator only on the final line — marks the bottom of the sticky zone. */
@@ -153,7 +170,7 @@
 .rh-sticky-h2 .rh-sticky-prefix { font-size: var(--h2-size, 1em); }
 .rh-sticky-h3 .rh-sticky-prefix { font-size: var(--h3-size, 1em); }
 
-/* ─── Semantic Outline Pane ─────────────────────────────────────────────────── */
+/* ─── Semantic Outline / Permanent TOC ──────────────────────────────────────── */
 
 .rh-outline {
 	padding: 6px 0;
@@ -186,6 +203,7 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	line-height: 1.5;
+	transition: background-color 80ms ease;
 }
 
 .rh-outline-label:hover {
@@ -196,13 +214,45 @@
 	color: var(--text-normal);
 }
 
-.rh-outline-heading > .rh-outline-label[data-level='1'] { font-weight: var(--font-semibold); }
-.rh-outline-heading > .rh-outline-label[data-level='2'] { font-weight: var(--font-medium); }
+/* Level-appropriate weights mirror Obsidian's native outline */
+.rh-outline-heading > .rh-outline-label[data-level='1'] {
+	font-weight: var(--font-semibold);
+	color: var(--h1-color, var(--text-normal));
+}
+.rh-outline-heading > .rh-outline-label[data-level='2'] {
+	font-weight: var(--font-medium);
+	color: var(--h2-color, var(--text-normal));
+}
+.rh-outline-heading > .rh-outline-label[data-level='3'] {
+	color: var(--h3-color, var(--text-normal));
+}
+.rh-outline-heading > .rh-outline-label[data-level='4'],
+.rh-outline-heading > .rh-outline-label[data-level='5'],
+.rh-outline-heading > .rh-outline-label[data-level='6'] {
+	color: var(--h4-color, var(--text-muted));
+}
 
 .rh-outline-return > .rh-outline-label {
 	color: var(--text-muted);
 	font-style: italic;
 	font-size: 0.9em;
+}
+
+/* ── Active section highlight ───────────────────────────────────────────────── */
+
+.rh-outline-active > .rh-outline-label {
+	background: var(--background-modifier-active-hover, var(--background-modifier-hover));
+	font-weight: var(--font-medium);
+}
+
+/* Keep the active item visible even without hover */
+.rh-outline-active > .rh-outline-label[data-level='1'],
+.rh-outline-active > .rh-outline-label[data-level='2'],
+.rh-outline-active > .rh-outline-label[data-level='3'],
+.rh-outline-active > .rh-outline-label[data-level='4'],
+.rh-outline-active > .rh-outline-label[data-level='5'],
+.rh-outline-active > .rh-outline-label[data-level='6'] {
+	color: var(--text-accent, var(--color-accent));
 }
 
 /* ─── Floating TOC ───────────────────────────────────────────────────────────── */
@@ -215,9 +265,6 @@
  * Position is controlled by .rh-ftoc-left / .rh-ftoc-right classes applied
  * from the floatingTocPosition setting.
  */
-/* Default: right edge. .rh-ftoc-left overrides for the left variant.
- * Having right:0 in the base rule means the panel is always visible even
- * if the position class fails to apply. */
 .rh-ftoc {
 	position: absolute;
 	right: 0;
@@ -248,11 +295,6 @@
 	box-shadow: var(--shadow-l);
 	overflow-y: auto;
 	overflow-x: hidden;
-}
-
-/* In pinned mode the panel is always expanded — remove hover-only treatment. */
-.rh-ftoc.rh-ftoc-pinned {
-	width: 230px;
 }
 
 /* ── Toolbar ────────────────────────────────────────────────────────────────── */

@@ -11,7 +11,7 @@
  * walking back to the target depth level.
  */
 
-import type { App, MarkdownPostProcessorContext, TFile } from 'obsidian';
+import type { App, MarkdownPostProcessorContext } from 'obsidian';
 import type { ReturnHeadingsSettings } from './settings';
 import { getDisplayLabel, parseMarker, resolveDepth } from './parser';
 
@@ -43,7 +43,7 @@ export function buildReadingViewProcessor(
 
 			// Resolve the target heading name using the metadata cache.
 			// Falls back to the generic label if cache isn't available.
-			const label = resolveReturnLabel(app, ctx, marker);
+			const label = resolveReturnLabel(app, ctx, el, marker);
 
 			elem.addClass('heading-return-visible');
 			elem.empty();
@@ -62,18 +62,23 @@ export function buildReadingViewProcessor(
  * Does not account for other return markers in the file (only raw headings
  * from the cache), which is an acceptable approximation for Reading View
  * where markers themselves are hidden.
+ *
+ * @param el - The top-level section element from the post-processor. Passed
+ *   to `ctx.getSectionInfo()` — must be the actual render-pass element, not
+ *   a detached dummy, to get correct line numbers.
  */
 function resolveReturnLabel(
 	app: App,
 	ctx: MarkdownPostProcessorContext,
+	el: HTMLElement,
 	marker: ReturnType<typeof parseMarker>,
 ): string {
 	if (!marker) return '';
 
-	const sectionInfo = ctx.getSectionInfo(
-		// getSectionInfo needs the actual element; pass a dummy to get file-level info
-		document.createElement('div'),
-	);
+	// Pass the actual section element so Obsidian can look it up in its
+	// internal section registry. A detached `document.createElement('div')`
+	// always returns null.
+	const sectionInfo = ctx.getSectionInfo(el);
 
 	const cache = app.metadataCache.getCache(ctx.sourcePath);
 	if (!cache?.headings || cache.headings.length === 0) {

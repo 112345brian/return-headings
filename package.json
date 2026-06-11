@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-return-headings",
-	"version": "0.1.0",
+	"version": "0.6.0",
 	"description": "Lightweight structural markers for returning to a previous heading depth in Obsidian notes.",
 	"main": "main.js",
 	"type": "module",

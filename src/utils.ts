@@ -119,8 +119,6 @@ export function findContextAtBoundaries(
  * Convenience one-shot function: scans `content` up to `targetLine` and
  * returns the virtual heading stack at that position.
  *
- * Equivalent to `findContextAtBoundaries(computeHeadingBoundaries(content), targetLine)`
- * but stops scanning at `targetLine` rather than processing the full document.
  * Prefer this when you need a single lookup; use the precomputed pair when
  * the same document is queried repeatedly (e.g. on every scroll frame).
  *
@@ -157,13 +155,10 @@ export function getContextAtLine(content: string, targetLine: number): HeadingEn
 
 /**
  * Binary-searches the boundary list for the first boundary whose line is
- * strictly **greater than** `currentLine` — i.e. the next structural event
- * that will change the heading context as the user scrolls down.
+ * strictly **greater than** `currentLine`.
  *
  * Returns the 0-indexed line number of that boundary, or `null` if there are
  * no more boundaries after `currentLine`.
- *
- * Used by the sticky bar to determine when to update the displayed context.
  *
  * @param boundaries - Output of `computeHeadingBoundaries`.
  * @param currentLine - 0-indexed line at the top of the visible editor area.
@@ -193,23 +188,94 @@ export function findNextBoundaryLine(
 
 /**
  * Returns the 0-indexed line number of the first fully visible line in the
- * CodeMirror editor, based on `scrollDOM.scrollTop`.
+ * CodeMirror editor.
  *
- * Returns `null` if the position cannot be determined (e.g. the editor has
- * not finished laying out).
+ * Uses `posAtCoords` with the actual screen position of the scroll container's
+ * top-left corner. This is reliable regardless of container padding or the
+ * content-area top offset — unlike `lineBlockAtHeight(scrollTop)` which
+ * produces wrong results when `--file-margins` or similar CSS adds padding
+ * above the first line.
  *
- * Extracted as a shared helper because both the sticky breadcrumb bar and
- * the floating TOC need identical scroll-position logic.
- *
- * @param cm - The CodeMirror 6 `EditorView` instance (accessed via
- *   `(editor as any).cm` in Obsidian plugins).
+ * @param cm - The CodeMirror 6 `EditorView` instance.
  */
 export function getFirstVisibleLineNum(cm: EditorView): number | null {
 	try {
-		const scrollTop = cm.scrollDOM.scrollTop;
-		const block = cm.lineBlockAtHeight(scrollTop);
-		return cm.state.doc.lineAt(block.from).number - 1; // convert to 0-indexed
+		const rect = cm.scrollDOM.getBoundingClientRect();
+		// Use screen coordinates 1px inside the top-left corner so the hit-test
+		// lands inside the content area rather than on the border.
+		const pos = cm.posAtCoords({ x: rect.left + 1, y: rect.top + 1 });
+		if (pos === null) return null;
+		return cm.state.doc.lineAt(pos).number - 1; // convert to 0-indexed
 	} catch {
 		return null;
 	}
+}
+
+// ── DOM helpers ───────────────────────────────────────────────────────────────
+
+/**
+ * Returns the text of a rendered heading element with any Strange New Worlds
+ * reference-count badges stripped out.
+ *
+ * SNW injects `.snw-reference` spans inside heading elements; without this
+ * stripping, `.textContent` would produce e.g. "Recents2" instead of "Recents".
+ */
+export function headingTextContent(h: HTMLElement): string {
+	const clone = h.cloneNode(true) as HTMLElement;
+	clone.querySelectorAll('.snw-reference, [class*="snw"]').forEach(n => n.remove());
+	return clone.textContent?.trim() ?? '';
+}
+
+/**
+ * Finds the source line for a rendered heading element using `metadataCache`.
+ *
+ * Strips SNW badges before comparing heading text. Returns `null` if the
+ * heading can't be mapped (e.g. no cache, or heading is inside an embed).
+ *
+ * @param h - The rendered `<h1>`–`<h6>` element.
+ * @param filePath - Source file path, used to look up the metadata cache.
+ * @param metadataCache - Obsidian's `MetadataCache` instance.
+ */
+export function headingElementToLine(
+	h: HTMLElement,
+	filePath: string,
+	metadataCache: { getCache(path: string): { headings?: { level: number; heading: string; position: { start: { line: number } } }[] } | null },
+): number | null {
+	const cache = metadataCache.getCache(filePath);
+	if (!cache?.headings) return null;
+
+	const text = headingTextContent(h);
+	const level = parseInt(h.tagName[1]!);
+
+	for (const ch of cache.headings) {
+		if (ch.level === level && ch.heading === text) {
+			return ch.position.start.line;
+		}
+	}
+	return null;
+}
+
+/**
+ * Returns the last rendered heading element (h1-h6) whose top edge is at or
+ * above `threshold` viewport-y, filtering out headings inside embeds.
+ *
+ * Used by reading-view scroll detection in the floating TOC and outline pane.
+ *
+ * @param section - `.markdown-preview-section` or similar container.
+ * @param threshold - Viewport Y coordinate (from `getBoundingClientRect().top`).
+ */
+export function lastHeadingAbove(section: HTMLElement, threshold: number): HTMLElement | null {
+	const headings = Array.from(
+		section.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6'),
+	).filter(h => !h.closest('.markdown-embed'));
+
+	let result: HTMLElement | null = null;
+	for (const h of headings) {
+		if (h.getBoundingClientRect().top <= threshold) {
+			result = h;
+		} else {
+			break;
+		}
+	}
+	return result;
 }

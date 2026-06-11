@@ -9,11 +9,10 @@
  *   and searched with binary search on each scroll frame (O(log n)).
  *
  *  **Reading View** (`ReadingViewStickyBar`):
- *   DOM-based class injected into `.markdown-preview-view`.  Uses
- *   `getBoundingClientRect()` on rendered heading elements to build the
- *   context stack without a source-to-render line-number mapping.  The
- *   virtual heading stack (return markers) is not applied here — Reading View
- *   shows raw headings only — but the visual presentation is identical.
+ *   DOM-based class injected into `.markdown-reading-view` (the outer wrapper
+ *   that does NOT scroll).  Uses `getBoundingClientRect()` on rendered heading
+ *   elements to build the context stack.  The scroll container is the inner
+ *   `.markdown-preview-view`.
  *
  * Adapted from obsidian-sticky-headings (MIT, zhouhua):
  *   https://github.com/zhouhua/obsidian-sticky-headings
@@ -28,6 +27,7 @@ import {
 	computeHeadingBoundaries,
 	findContextAtBoundaries,
 	getFirstVisibleLineNum,
+	headingTextContent,
 } from './utils';
 
 export type { HeadingEntry };
@@ -39,7 +39,7 @@ const MAX_LINES = 5;
 /**
  * Clears `bar` and rebuilds one `div.rh-sticky-line` per context entry.
  * Each line shows `## Heading text` with level-appropriate styling.
- * Clicking a line calls `onJump(entry)`.
+ * Clicking a line calls `onJump(idx)`.
  */
 function buildLines(
 	bar: HTMLElement,
@@ -74,24 +74,31 @@ function renderEditorBar(
 	settings: ReturnHeadingsSettings,
 ): void {
 	if (!settings.stickyHeadingsEnabled) {
-		bar.style.display = 'none';
+		bar.addClass('rh-hidden');
 		return;
 	}
 
 	const lineNum = getFirstVisibleLineNum(view);
 	if (lineNum === null || lineNum < 1 || view.scrollDOM.scrollTop < 1) {
-		bar.style.display = 'none';
+		bar.addClass('rh-hidden');
 		return;
 	}
 
-	const rawContext = findContextAtBoundaries(boundaries, lineNum);
-	// Filter out heading levels shallower than the configured minimum.
-	const context = settings.stickyHeadingsMinLevel > 1
-		? rawContext.filter(e => e.level >= settings.stickyHeadingsMinLevel)
-		: rawContext;
+	// Lazily recompute if boundaries are empty (can happen on first render
+	// before docChanged fires).
+	const activeBoundaries =
+		boundaries.length === 0
+			? computeHeadingBoundaries(view.state.doc.toString())
+			: boundaries;
+
+	const rawContext = findContextAtBoundaries(activeBoundaries, lineNum);
+	const context =
+		settings.stickyHeadingsMinLevel > 1
+			? rawContext.filter(e => e.level >= settings.stickyHeadingsMinLevel)
+			: rawContext;
 
 	if (context.length === 0) {
-		bar.style.display = 'none';
+		bar.addClass('rh-hidden');
 		return;
 	}
 
@@ -113,11 +120,11 @@ function renderEditorBar(
 		view.focus();
 	});
 
-	bar.style.display = '';
+	bar.removeClass('rh-hidden');
 }
 
 /**
- * Builds the CM6 `ViewPlugin` for editor mode (source / Live Preview).
+ * Builds the CM6 `ViewPlugin` extension for editor mode (source / Live Preview).
  * The bar is injected as `position:absolute; top:0` into `view.dom`
  * (`.cm-editor`), overlaying the scroller so content passes beneath it.
  */
@@ -130,9 +137,8 @@ export function buildStickyBarExtension(getSettings: () => ReturnHeadingsSetting
 			private readonly scrollHandler: () => void;
 
 			constructor(private readonly view: EditorView) {
-				this.bar = document.createElement('div');
-				this.bar.className = 'rh-sticky-bar';
-				this.bar.style.display = 'none';
+				this.bar = view.dom.ownerDocument.createElement('div');
+				this.bar.className = 'rh-sticky-bar rh-hidden';
 				view.dom.appendChild(this.bar);
 
 				this.boundaries = computeHeadingBoundaries(view.state.doc.toString());
@@ -140,7 +146,7 @@ export function buildStickyBarExtension(getSettings: () => ReturnHeadingsSetting
 				this.scrollHandler = () => {
 					if (this.rafPending) return;
 					this.rafPending = true;
-					requestAnimationFrame(() => {
+					view.dom.ownerDocument.defaultView!.requestAnimationFrame(() => {
 						renderEditorBar(this.bar, this.view, this.boundaries, getSettings());
 						this.rafPending = false;
 					});
@@ -172,16 +178,25 @@ export function buildStickyBarExtension(getSettings: () => ReturnHeadingsSetting
 /**
  * DOM-based sticky bar for Reading View.
  *
- * Injected as `position:absolute; top:0` into `.markdown-preview-view`.
+ * Injected as `position:absolute; top:0` into `.markdown-reading-view` (the
+ * outer non-scrolling wrapper) so the bar stays fixed at the top while the
+ * content scrolls inside `.markdown-preview-view`.
+ *
  * On each scroll frame it walks rendered `<h1>`–`<h6>` elements and builds
  * a heading stack from whatever is above the bar's bottom edge.
+ *
+ * Headings inside embedded notes (`.markdown-embed`) are excluded so they
+ * don't pollute the context of the parent note.
+ *
+ * Strange New Worlds reference-count badges are stripped from heading text
+ * via `headingTextContent()` before display.
  *
  * Return markers are not reflected here (they're hidden in Reading View) —
  * the context is based on the raw rendered heading hierarchy only.
  */
 export class ReadingViewStickyBar {
-	private bar: HTMLElement;
-	private previewEl: HTMLElement | null = null;
+	private bar: HTMLElement | null = null;
+	private hostEl: HTMLElement | null = null;
 	private scrollEl: HTMLElement | null = null;
 	private rafPending = false;
 	private contextKey = '';
@@ -190,29 +205,34 @@ export class ReadingViewStickyBar {
 	constructor(
 		private readonly view: MarkdownView,
 		private readonly getSettings: () => ReturnHeadingsSettings,
-	) {
-		this.bar = document.createElement('div');
-		this.bar.className = 'rh-sticky-bar';
-		this.bar.style.display = 'none';
-	}
+	) {}
 
 	attach(): void {
-		const previewEl =
-			this.view.containerEl.querySelector<HTMLElement>('.markdown-preview-view');
-		if (!previewEl) return;
+		const containerEl = this.view.containerEl;
 
-		this.previewEl = previewEl;
-		// Overlay the preview so content scrolls beneath the bar.
-		previewEl.style.position = 'relative';
-		previewEl.prepend(this.bar);
+		// The bar is placed inside the outer non-scrolling wrapper so it stays
+		// fixed while .markdown-preview-view scrolls beneath it.
+		const hostEl = containerEl.querySelector<HTMLElement>('.markdown-reading-view');
+		if (!hostEl) return;
 
-		// Walk up to find the actual scroll container.
-		this.scrollEl = this.findScrollParent(previewEl);
+		this.hostEl = hostEl;
+
+		const doc = containerEl.ownerDocument;
+		this.bar = doc.createElement('div');
+		this.bar.className = 'rh-sticky-bar rh-hidden';
+
+		hostEl.addClass('rh-position-relative');
+		hostEl.prepend(this.bar);
+
+		// The actual scroll container is the inner preview element.
+		this.scrollEl =
+			containerEl.querySelector<HTMLElement>('.markdown-preview-view') ??
+			this.findScrollParent(hostEl);
 
 		this.scrollHandler = () => {
 			if (this.rafPending) return;
 			this.rafPending = true;
-			requestAnimationFrame(() => {
+			doc.defaultView!.requestAnimationFrame(() => {
 				this.update();
 				this.rafPending = false;
 			});
@@ -226,54 +246,60 @@ export class ReadingViewStickyBar {
 		if (this.scrollHandler && this.scrollEl) {
 			this.scrollEl.removeEventListener('scroll', this.scrollHandler);
 		}
-		this.bar.remove();
+		this.bar?.remove();
+		this.bar = null;
+		this.hostEl?.removeClass('rh-position-relative');
+		this.hostEl = null;
+		this.scrollEl = null;
 	}
 
 	private findScrollParent(el: HTMLElement): HTMLElement {
+		const doc = el.ownerDocument;
 		let cur: HTMLElement | null = el.parentElement;
-		while (cur && cur !== document.body) {
-			const { overflowY } = window.getComputedStyle(cur);
+		while (cur && cur !== doc.body) {
+			const { overflowY } = doc.defaultView!.getComputedStyle(cur);
 			if (overflowY === 'auto' || overflowY === 'scroll') return cur;
 			cur = cur.parentElement;
 		}
-		return document.documentElement as HTMLElement;
+		return doc.documentElement;
 	}
 
 	private update(): void {
 		const settings = this.getSettings();
-		if (!settings.stickyHeadingsEnabled || !this.previewEl) {
-			this.bar.style.display = 'none';
+		if (!settings.stickyHeadingsEnabled || !this.scrollEl || !this.bar) {
+			this.bar?.addClass('rh-hidden');
 			return;
 		}
 
-		const scrollTop = this.scrollEl?.scrollTop ?? window.scrollY;
+		const scrollTop = this.scrollEl.scrollTop;
 		if (scrollTop < 1) {
-			this.bar.style.display = 'none';
+			this.bar.addClass('rh-hidden');
 			return;
 		}
 
-		const section = this.previewEl.querySelector<HTMLElement>('.markdown-preview-section');
+		const section = this.scrollEl.querySelector<HTMLElement>('.markdown-preview-section');
 		if (!section) return;
 
 		const headingEls = Array.from(
 			section.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6'),
-		);
+		).filter(h => !h.closest('.markdown-embed'));
+
 		if (headingEls.length === 0) {
-			this.bar.style.display = 'none';
+			this.bar.addClass('rh-hidden');
 			return;
 		}
 
 		// Build context from headings whose bottom edge is above the bar's bottom.
-		const barBottom =
-			this.previewEl.getBoundingClientRect().top + (this.bar.offsetHeight || 0) + 2;
+		const barBottom = this.bar.getBoundingClientRect().bottom + 2;
 
 		const rawStack: { level: number; text: string; el: HTMLElement }[] = [];
 
 		for (const h of headingEls) {
 			if (h.getBoundingClientRect().bottom > barBottom) break;
 			const level = parseInt(h.tagName[1]!);
-			const text = h.textContent?.trim() ?? '';
-			while (rawStack.length > 0 && rawStack[rawStack.length - 1]!.level >= level) rawStack.pop();
+			const text = headingTextContent(h);
+			while (rawStack.length > 0 && rawStack[rawStack.length - 1]!.level >= level)
+				rawStack.pop();
 			rawStack.push({ level, text, el: h });
 		}
 
@@ -281,7 +307,7 @@ export class ReadingViewStickyBar {
 		const stack = minLevel > 1 ? rawStack.filter(e => e.level >= minLevel) : rawStack;
 
 		if (stack.length === 0) {
-			this.bar.style.display = 'none';
+			this.bar.addClass('rh-hidden');
 			return;
 		}
 
@@ -289,13 +315,14 @@ export class ReadingViewStickyBar {
 		if (contextKey === this.contextKey) return;
 		this.contextKey = contextKey;
 
-		this.bar.empty();
+		const bar = this.bar;
+		bar.empty();
 		const visible = stack.length > MAX_LINES ? stack.slice(-MAX_LINES) : stack;
 
 		for (let i = 0; i < visible.length; i++) {
 			const entry = visible[i]!;
 			const isLast = i === visible.length - 1;
-			const line = this.bar.createEl('div', {
+			const line = bar.createEl('div', {
 				cls: `rh-sticky-line rh-sticky-h${entry.level}${isLast ? ' rh-sticky-line-last' : ''}`,
 			});
 			line.createEl('span', { text: '#'.repeat(entry.level) + ' ', cls: 'rh-sticky-prefix' });
@@ -306,6 +333,6 @@ export class ReadingViewStickyBar {
 			);
 		}
 
-		this.bar.style.display = '';
+		bar.removeClass('rh-hidden');
 	}
 }

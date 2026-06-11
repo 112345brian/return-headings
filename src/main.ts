@@ -38,13 +38,12 @@ export default class ReturnHeadingsPlugin extends Plugin {
 
 		this.registerView(VIEW_TYPE_OUTLINE, leaf => new ReturnHeadingsOutlineView(leaf, this));
 
-		this.addRibbonIcon('list-tree', 'Return Headings outline', () => {
-			this.activateOutlineView();
+		this.addRibbonIcon('list-tree', 'Return headings outline', () => {
+			void this.activateOutlineView();
 		});
 
 		this.registerEvent(
 			this.app.workspace.on('active-leaf-change', () => {
-				this.refreshOutlineView();
 				this.syncFloatingTocPanels();
 				this.syncReadingStickyBars();
 			}),
@@ -58,16 +57,25 @@ export default class ReturnHeadingsPlugin extends Plugin {
 		);
 
 		this.registerEvent(
+			this.app.workspace.on('file-open', () => {
+				this.syncFloatingTocPanels();
+				this.syncReadingStickyBars();
+			}),
+		);
+
+		this.registerEvent(
 			this.app.workspace.on('editor-change', () => {
-				this.refreshOutlineView();
-				const active = this.app.workspace.activeLeaf;
+				const active = this.app.workspace.getActiveViewOfType(MarkdownView)?.leaf;
 				if (active) this.tocPanels.get(active)?.refresh();
 			}),
 		);
 
-		this.syncFloatingTocPanels();
-		// Delay initial reading-view bar attachment to let the DOM settle.
-		setTimeout(() => this.syncReadingStickyBars(), 200);
+		// Wait for the workspace layout to be ready before attaching DOM-dependent
+		// components — avoids race conditions on startup and cold loads.
+		this.app.workspace.onLayoutReady(() => {
+			this.syncFloatingTocPanels();
+			this.syncReadingStickyBars();
+		});
 
 		this.addSettingTab(new ReturnHeadingsSettingTab(this.app, this));
 
@@ -115,18 +123,18 @@ export default class ReturnHeadingsPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'toggle-floating-toc',
-			name: 'Toggle floating TOC',
+			name: 'Toggle floating toc',
 			callback: async () => {
 				this.settings.floatingTocEnabled = !this.settings.floatingTocEnabled;
 				await this.saveSettings();
-				this.syncFloatingTocPanels();
+				this.reattachFloatingToc();
 			},
 		});
 
 		this.addCommand({
 			id: 'open-outline',
-			name: 'Open Return Headings outline',
-			callback: () => this.activateOutlineView(),
+			name: 'Open outline',
+			callback: () => void this.activateOutlineView(),
 		});
 	}
 
@@ -135,7 +143,8 @@ export default class ReturnHeadingsPlugin extends Plugin {
 		this.tocPanels.clear();
 		for (const bar of this.readingStickyBars.values()) bar.detach();
 		this.readingStickyBars.clear();
-		this.app.workspace.detachLeavesOfType(VIEW_TYPE_OUTLINE);
+		// Note: do NOT call detachLeavesOfType here — Obsidian handles view
+		// cleanup on plugin unload automatically.
 	}
 
 	async loadSettings() {
@@ -150,7 +159,14 @@ export default class ReturnHeadingsPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
+	/**
+	 * Force-detaches all floating TOC panels and re-creates them with current
+	 * settings. Called when position or mode settings change so the new classes
+	 * take effect immediately.
+	 */
 	reattachFloatingToc() {
+		for (const panel of this.tocPanels.values()) panel.detach();
+		this.tocPanels.clear();
 		this.syncFloatingTocPanels();
 	}
 
@@ -189,18 +205,16 @@ export default class ReturnHeadingsPlugin extends Plugin {
 	 * currently in Reading View mode. Called on layout changes and mode switches.
 	 */
 	private syncReadingStickyBars() {
-		// Collect all leaves currently in reading/preview mode.
 		const readingLeaves = new Set<WorkspaceLeaf>();
 		this.app.workspace.iterateAllLeaves(leaf => {
 			if (
 				leaf.view instanceof MarkdownView &&
-				(leaf.view as MarkdownView).getMode() === 'preview'
+				leaf.view.getMode() === 'preview'
 			) {
 				readingLeaves.add(leaf);
 			}
 		});
 
-		// Detach bars for leaves that are no longer in reading mode or closed.
 		for (const [leaf, bar] of this.readingStickyBars) {
 			if (!readingLeaves.has(leaf)) {
 				bar.detach();
@@ -208,36 +222,28 @@ export default class ReturnHeadingsPlugin extends Plugin {
 			}
 		}
 
-		// Attach bars for newly detected reading-mode leaves.
 		for (const leaf of readingLeaves) {
 			if (!this.readingStickyBars.has(leaf)) {
 				const bar = new ReadingViewStickyBar(
 					leaf.view as MarkdownView,
 					() => this.settings,
 				);
-				// Small delay so the preview DOM is fully rendered before we inject.
-				setTimeout(() => bar.attach(), 80);
+				bar.attach();
 				this.readingStickyBars.set(leaf, bar);
 			}
-		}
-	}
-
-	private refreshOutlineView() {
-		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_OUTLINE)) {
-			(leaf.view as ReturnHeadingsOutlineView).scheduleRefresh();
 		}
 	}
 
 	private async activateOutlineView() {
 		const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_OUTLINE);
 		if (existing.length > 0) {
-			this.app.workspace.revealLeaf(existing[0]!);
+			await this.app.workspace.revealLeaf(existing[0]!);
 			return;
 		}
 		const leaf = this.app.workspace.getRightLeaf(false);
 		if (leaf) {
 			await leaf.setViewState({ type: VIEW_TYPE_OUTLINE, active: true });
-			this.app.workspace.revealLeaf(leaf);
+			await this.app.workspace.revealLeaf(leaf);
 		}
 	}
 }

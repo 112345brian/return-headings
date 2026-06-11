@@ -11,22 +11,18 @@
  * - Hover-to-expand / pin UX pattern.
  * - Per-leaf panel lifecycle (attach/detach on leaf open/close).
  * - rAF-throttled scroll handler.
- * - Binary search on precomputed boundaries for O(log n) highlight updates
- *   (the source plugin uses binary search on `metadataCache.headings`; we
- *   use it on our precomputed `HeadingBoundary[]`).
+ * - Binary search on precomputed boundaries for O(log n) highlight updates.
  *
  * **What differs:**
  * - Heading source: `metadataCache.headings` → `buildVirtualTree()`. Return
- *   markers (`---h2`, `---h-1`) appear as square-dot nodes in the tree,
- *   nested correctly under the heading they re-enter.
- * - Scroll highlight: raw heading lookup → `findContextAtBoundaries()`, so
- *   scrolling past a return marker correctly shifts the highlighted dot to the
- *   resumed heading rather than the nearest raw heading above the cursor.
+ *   markers appear as square-dot nodes in the tree.
+ * - Scroll highlight: raw heading lookup → `findContextAtBoundaries()`.
+ * - Reading View support: listens on `.markdown-preview-view` scroller and
+ *   uses DOM-based heading detection when in preview mode.
  * - No Vue / Svelte / lodash — plain TypeScript + Obsidian DOM helpers.
- * - No search modal or Ctrl+click fold (deferred to a future version).
  */
 
-import type { EditorView } from '@codemirror/view';
+import { EditorView } from '@codemirror/view';
 import type { MarkdownView } from 'obsidian';
 import type { ReturnHeadingsSettings } from './settings';
 import { buildVirtualTree, type OutlineNode } from './virtual-tree';
@@ -35,6 +31,9 @@ import {
 	computeHeadingBoundaries,
 	findContextAtBoundaries,
 	getFirstVisibleLineNum,
+	headingElementToLine,
+	headingTextContent,
+	lastHeadingAbove,
 } from './utils';
 
 // ── Panel ────────────────────────────────────────────────────────────────────
@@ -47,10 +46,6 @@ import {
  * 2. `attach()` — inject DOM and wire scroll listener.
  * 3. `refresh()` — rebuild tree and highlight (called on `editor-change`).
  * 4. `detach()` — remove DOM and clean up listeners.
- *
- * `FloatingTocPanel` instances are managed by the main plugin via a
- * `Map<WorkspaceLeaf, FloatingTocPanel>` that is synced on `layout-change`
- * and `active-leaf-change`. See `main.ts → syncFloatingTocPanels()`.
  */
 export class FloatingTocPanel {
 	private readonly container: HTMLElement;
@@ -63,50 +58,42 @@ export class FloatingTocPanel {
 	/** The currently highlighted `<li>`, if any. */
 	private locatedEl: HTMLElement | null = null;
 
-	private scrollEl: HTMLElement | null = null;
+	private editorScrollEl: HTMLElement | null = null;
+	private readingScrollEl: HTMLElement | null = null;
 	private scrollHandler: (() => void) | null = null;
 	private rafPending = false;
 	private pinned = false;
+	private hostPositionSet = false;
 
-	/**
-	 * Precomputed heading boundaries — recomputed on `refresh()`, searched on
-	 * every scroll frame. Mirrors the binary-search optimisation used in
-	 * obsidian-floating-toc-plugin's `_handleScroll`.
-	 */
+	/** Precomputed heading boundaries, recomputed on `refresh()`. */
 	private boundaries: HeadingBoundary[] = [];
 
 	constructor(view: MarkdownView, getSettings: () => ReturnHeadingsSettings) {
 		this.mdView = view;
 		this.getSettings = getSettings;
-		this.container = document.createElement('div');
+		this.container = view.containerEl.ownerDocument.createElement('div');
 		this.container.className = 'rh-ftoc';
 	}
 
 	/**
-	 * Injects the panel DOM before `.markdown-source-view` (or
-	 * `.markdown-reading-view`) and wires the scroll listener.
-	 *
-	 * The injection point sits inside `.view-content` which has
-	 * `position: relative` in Obsidian — this is the same strategy used by
-	 * obsidian-floating-toc-plugin to achieve correct absolute positioning.
-	 *
-	 * Does nothing if `floatingTocEnabled` is false in settings.
+	 * Injects the panel DOM and wires scroll listeners for both editor and
+	 * reading view modes.
 	 */
 	attach(): void {
 		const settings = this.getSettings();
 		if (!settings.floatingTocEnabled) return;
 
-		// Try standard view elements first; fall back to .view-content so the
-		// TOC still mounts when third-party plugins modify the view DOM.
 		const anchor =
 			this.mdView.containerEl.querySelector<HTMLElement>('.markdown-source-view') ??
 			this.mdView.containerEl.querySelector<HTMLElement>('.markdown-reading-view') ??
 			this.mdView.containerEl.querySelector<HTMLElement>('.view-content');
 
 		const host = anchor?.parentElement ?? this.mdView.containerEl;
-		(host as HTMLElement).style.position = 'relative';
+		if (!host.hasClass('rh-position-relative')) {
+			host.addClass('rh-position-relative');
+			this.hostPositionSet = true;
+		}
 
-		// Apply position and mode classes before inserting so CSS takes effect immediately.
 		this.applyPositionClasses();
 
 		if (anchor && anchor.parentElement === host) {
@@ -116,32 +103,49 @@ export class FloatingTocPanel {
 		}
 		this.buildContent();
 
-		this.scrollEl = this.mdView.containerEl.querySelector<HTMLElement>('.cm-scroller');
-		if (this.scrollEl) {
-			this.scrollHandler = () => {
-				if (this.rafPending) return;
-				this.rafPending = true;
-				requestAnimationFrame(() => {
-					this.updateHighlight();
-					this.rafPending = false;
-				});
-			};
-			this.scrollEl.addEventListener('scroll', this.scrollHandler, { passive: true });
-		}
+		this.scrollHandler = () => {
+			if (this.rafPending) return;
+			this.rafPending = true;
+			this.mdView.containerEl.ownerDocument.defaultView!.requestAnimationFrame(() => {
+				this.updateHighlight();
+				this.rafPending = false;
+			});
+		};
+
+		// Wire editor scroller.
+		this.editorScrollEl =
+			this.mdView.containerEl.querySelector<HTMLElement>('.cm-scroller');
+		this.editorScrollEl?.addEventListener('scroll', this.scrollHandler, { passive: true });
+
+		// Wire reading view scroller.
+		this.readingScrollEl =
+			this.mdView.containerEl.querySelector<HTMLElement>('.markdown-preview-view');
+		this.readingScrollEl?.addEventListener('scroll', this.scrollHandler, { passive: true });
 	}
 
-	/** Removes the panel DOM and scroll listener. */
+	/** Removes the panel DOM and scroll listeners. */
 	detach(): void {
-		if (this.scrollHandler && this.scrollEl) {
-			this.scrollEl.removeEventListener('scroll', this.scrollHandler);
+		if (this.scrollHandler) {
+			this.editorScrollEl?.removeEventListener('scroll', this.scrollHandler);
+			this.readingScrollEl?.removeEventListener('scroll', this.scrollHandler);
 		}
 		this.container.remove();
 		this.lineToEl.clear();
+
+		const anchor =
+			this.mdView.containerEl.querySelector<HTMLElement>('.markdown-source-view') ??
+			this.mdView.containerEl.querySelector<HTMLElement>('.markdown-reading-view') ??
+			this.mdView.containerEl.querySelector<HTMLElement>('.view-content');
+		const host = anchor?.parentElement ?? this.mdView.containerEl;
+		if (this.hostPositionSet) {
+			host.removeClass('rh-position-relative');
+			this.hostPositionSet = false;
+		}
 	}
 
 	/**
-	 * Rebuilds the TOC tree from the current document state and updates the
-	 * scroll highlight. Called by the main plugin on `editor-change`.
+	 * Rebuilds the TOC tree and updates the scroll highlight.
+	 * Called by the main plugin on `editor-change`.
 	 */
 	refresh(): void {
 		this.lineToEl.clear();
@@ -153,13 +157,11 @@ export class FloatingTocPanel {
 
 	// ── Private ───────────────────────────────────────────────────────────────
 
-	/** Syncs position/mode CSS classes from current settings onto the container. */
 	private applyPositionClasses(): void {
 		const settings = this.getSettings();
 		this.container.toggleClass('rh-ftoc-left', settings.floatingTocPosition === 'left');
 		this.container.toggleClass('rh-ftoc-right', settings.floatingTocPosition === 'right');
 
-		// In pinned mode the panel is always fully expanded.
 		this.pinned = settings.floatingTocMode === 'pinned';
 		this.container.toggleClass('rh-ftoc-pinned', this.pinned);
 	}
@@ -167,11 +169,10 @@ export class FloatingTocPanel {
 	private buildContent(): void {
 		const toolbar = this.container.createEl('div', { cls: 'rh-ftoc-toolbar' });
 
-		// Pin button is only meaningful in floating mode; hide it when pinned-by-default.
 		if (this.getSettings().floatingTocMode === 'floating') {
 			const pinBtn = toolbar.createEl('button', {
 				cls: 'rh-ftoc-pin-btn',
-				attr: { title: 'Pin TOC' },
+				attr: { title: 'Pin toc' },
 			});
 			pinBtn.setText('⊕');
 			pinBtn.addEventListener('click', e => {
@@ -182,9 +183,16 @@ export class FloatingTocPanel {
 			});
 		}
 
-		const content = this.mdView.editor.getValue();
+		// getViewData() works in both editing and reading mode.
+		let content: string;
+		try {
+			content = this.mdView.getViewData();
+		} catch {
+			content = this.mdView.editor.getValue();
+		}
 
-		// Precompute boundaries here so scroll updates are O(log n).
+		if (!content) return;
+
 		this.boundaries = computeHeadingBoundaries(content);
 
 		const tree = buildVirtualTree(content);
@@ -210,15 +218,7 @@ export class FloatingTocPanel {
 			if (node.type === 'heading') {
 				this.lineToEl.set(node.line, li);
 				const targetLine = node.line;
-				row.addEventListener('click', () => {
-					const editor = this.mdView.editor;
-					editor.setCursor({ line: targetLine, ch: 0 });
-					editor.scrollIntoView(
-						{ from: { line: targetLine, ch: 0 }, to: { line: targetLine, ch: 0 } },
-						true,
-					);
-					this.mdView.app.workspace.setActiveLeaf(this.mdView.leaf, { focus: true });
-				});
+				row.addEventListener('click', () => this.jumpToLine(targetLine));
 			}
 
 			if (node.children.length > 0) {
@@ -229,16 +229,74 @@ export class FloatingTocPanel {
 	}
 
 	/**
-	 * Determines the current heading context via binary search on
-	 * `this.boundaries` and updates the `.rh-ftoc-located` CSS class.
-	 *
-	 * O(log n) — safe to call on every rAF tick.
+	 * Scrolls the editor or reading view to the given 0-indexed source line.
+	 * Works in both edit mode (CM dispatch) and reading mode (DOM scrollIntoView).
+	 */
+	private jumpToLine(targetLine: number): void {
+		const mode = this.mdView.getMode();
+
+		if (mode === 'preview') {
+			// Reading view: find the rendered heading element and scroll it into view.
+			const file = this.mdView.file;
+			if (!file) return;
+			const cache = this.mdView.app.metadataCache.getCache(file.path);
+			const ch = cache?.headings?.find(h => h.position.start.line === targetLine);
+			if (!ch) return;
+
+			const section =
+				this.mdView.containerEl.querySelector<HTMLElement>('.markdown-preview-section');
+			if (!section) return;
+
+			const headingEls = Array.from(section.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6'));
+			for (const el of headingEls) {
+				if (
+					el.tagName.toLowerCase() === `h${ch.level}` &&
+					headingTextContent(el) === ch.heading
+				) {
+					el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+					return;
+				}
+			}
+		} else {
+			const cm = (this.mdView.editor as unknown as { cm?: EditorView }).cm;
+			if (!cm) {
+				// Fallback for source mode without direct CM access.
+				const editor = this.mdView.editor;
+				editor.setCursor({ line: targetLine, ch: 0 });
+				editor.scrollIntoView(
+					{ from: { line: targetLine, ch: 0 }, to: { line: targetLine, ch: 0 } },
+					true,
+				);
+				this.mdView.app.workspace.setActiveLeaf(this.mdView.leaf, { focus: true });
+				return;
+			}
+			const cmLine = cm.state.doc.line(
+				Math.max(1, Math.min(targetLine + 1, cm.state.doc.lines)),
+			);
+			cm.dispatch({
+				selection: { anchor: cmLine.from },
+				effects: EditorView.scrollIntoView(cmLine.from, { y: 'start', yMargin: 0 }),
+			});
+			cm.focus();
+		}
+	}
+
+	/**
+	 * Determines the current heading context and updates the `.rh-ftoc-located`
+	 * class. Handles both editor mode (CM line lookup) and reading view mode
+	 * (DOM heading detection).
 	 */
 	private updateHighlight(): void {
-		const cm = (this.mdView.editor as unknown as { cm?: EditorView }).cm;
-		if (!cm) return;
+		let lineNum: number | null = null;
+		const mode = this.mdView.getMode();
 
-		const lineNum = getFirstVisibleLineNum(cm);
+		if (mode === 'preview') {
+			lineNum = this.currentLineInPreview();
+		} else {
+			const cm = (this.mdView.editor as unknown as { cm?: EditorView }).cm;
+			if (cm) lineNum = getFirstVisibleLineNum(cm);
+		}
+
 		if (lineNum === null) return;
 
 		const context = findContextAtBoundaries(this.boundaries, lineNum);
@@ -250,17 +308,37 @@ export class FloatingTocPanel {
 
 		if (context.length === 0) return;
 
-		// The deepest heading in the virtual stack is the current location.
 		const current = context[context.length - 1]!;
 		const el = this.lineToEl.get(current.line);
 		if (el) {
 			el.addClass('rh-ftoc-located');
 			this.locatedEl = el;
-			// Auto-scroll within the TOC only when pinned; otherwise the panel
-			// is not wide enough to show text and the scroll would be invisible.
 			if (this.pinned) {
 				el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 			}
 		}
+	}
+
+	/**
+	 * Finds the 0-indexed source line of the last heading visible above the
+	 * top of the reading view viewport.
+	 */
+	private currentLineInPreview(): number | null {
+		const previewScroller =
+			this.mdView.containerEl.querySelector<HTMLElement>('.markdown-preview-view');
+		if (!previewScroller) return null;
+
+		const section =
+			previewScroller.querySelector<HTMLElement>('.markdown-preview-section');
+		if (!section) return null;
+
+		const scrollerTop = previewScroller.getBoundingClientRect().top;
+		const h = lastHeadingAbove(section, scrollerTop + 5);
+		if (!h) return null;
+
+		const file = this.mdView.file;
+		if (!file) return null;
+
+		return headingElementToLine(h, file.path, this.mdView.app.metadataCache);
 	}
 }

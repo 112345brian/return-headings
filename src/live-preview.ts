@@ -37,8 +37,8 @@ class ReturnMarkerWidget extends WidgetType {
 		super();
 	}
 
-	toDOM(): HTMLElement {
-		const span = document.createElement('span');
+	toDOM(view: EditorView): HTMLElement {
+		const span = view.dom.ownerDocument.createElement('span');
 		span.className =
 			'heading-return-marker' + (this.invalid ? ' heading-return-marker-invalid' : '');
 		span.textContent = this.label;

@@ -1,8 +1,8 @@
 {
 	"id": "return-headings",
 	"name": "Return Headings",
-	"version": "0.5.0",
-	"minAppVersion": "1.0.0",
+	"version": "0.6.0",
+	"minAppVersion": "1.7.2",
 	"description": "Heading-return markers (---h2, ---h-1) with a semantic outline pane that understands virtual heading structure.",
 	"author": "112345brian",
 	"authorUrl": "https://github.com/112345brian",

@@ -48,14 +48,13 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
-		containerEl.createEl('h2', { text: 'Return Headings' });
 
 		// ── Marker display ─────────────────────────────────────────────────────
 
-		containerEl.createEl('h3', { text: 'Marker display' });
+		new Setting(containerEl).setName('Marker display').setHeading();
 
 		new Setting(containerEl)
-			.setName('Hide markers in Reading View')
+			.setName('Hide markers in reading view')
 			.setDesc('Markers like ---h2 and ---h-1 are invisible when reading.')
 			.addToggle(t =>
 				t.setValue(this.plugin.settings.hideMarkersInReadingView).onChange(async v => {
@@ -65,7 +64,7 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName('Show subtle markers in Live Preview')
+			.setName('Show subtle markers in live preview')
 			.setDesc('Replace raw marker syntax with a faint label (e.g. ↩ H2) while editing.')
 			.addToggle(t =>
 				t.setValue(this.plugin.settings.showSubtleMarkersInLivePreview).onChange(async v => {
@@ -76,7 +75,7 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 
 		// ── Validation ─────────────────────────────────────────────────────────
 
-		containerEl.createEl('h3', { text: 'Validation' });
+		new Setting(containerEl).setName('Validation').setHeading();
 
 		new Setting(containerEl)
 			.setName('Validate impossible returns')
@@ -100,7 +99,7 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 
 		// ── Navigation ─────────────────────────────────────────────────────────
 
-		containerEl.createEl('h3', { text: 'Navigation' });
+		new Setting(containerEl).setName('Navigation').setHeading();
 
 		new Setting(containerEl)
 			.setName('Sticky heading bar')
@@ -123,20 +122,22 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 			.addDropdown(d =>
 				d
 					.addOption('1', 'H1 — show all')
-					.addOption('2', 'H2 — hide H1')
-					.addOption('3', 'H3 — hide H1, H2')
-					.addOption('4', 'H4 — hide H1–H3')
-					.addOption('5', 'H5 — hide H1–H4')
-					.addOption('6', 'H6 — hide H1–H5')
+					.addOption('2', 'H2 — hide h1')
+					.addOption('3', 'H3 — hide h1, h2')
+					.addOption('4', 'H4 — hide h1–h3')
+					.addOption('5', 'H5 — hide h1–h4')
+					.addOption('6', 'H6 — hide h1–h5')
 					.setValue(String(this.plugin.settings.stickyHeadingsMinLevel))
 					.onChange(async v => {
 						this.plugin.settings.stickyHeadingsMinLevel = parseInt(v);
 						await this.plugin.saveSettings();
+						// Refresh TOC panels too since min-level affects them.
+						this.plugin.reattachFloatingToc();
 					}),
 			);
 
 		new Setting(containerEl)
-			.setName('Floating TOC')
+			.setName('Floating toc')
 			.setDesc('Show a table of contents panel on the edge of the editor.')
 			.addToggle(t =>
 				t.setValue(this.plugin.settings.floatingTocEnabled).onChange(async v => {
@@ -147,8 +148,8 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName('TOC position')
-			.setDesc('Which edge of the editor the TOC panel anchors to.')
+			.setName('Toc position')
+			.setDesc('Which edge of the editor the toc panel anchors to.')
 			.addDropdown((d: DropdownComponent) =>
 				d
 					.addOption('right', 'Right')
@@ -162,7 +163,7 @@ export class ReturnHeadingsSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName('TOC mode')
+			.setName('Toc mode')
 			.setDesc(
 				'Floating: collapsed to a thin indicator strip, expands on hover. ' +
 				'Pinned: always expanded at full width.',
