@@ -46,6 +46,13 @@ export class ReturnHeadingsOutlineView extends ItemView {
 
 	private rootEl!: HTMLElement;
 
+	/**
+	 * The last MarkdownView we successfully rendered for. Retained so that
+	 * when focus shifts to the outline pane itself, clicks and refreshes don't
+	 * treat the outline as "no markdown file open" and wipe the tree.
+	 */
+	private lastMdView: MarkdownView | null = null;
+
 	/** Maps 0-indexed source line → the item div for that heading. */
 	private lineToEl = new Map<number, HTMLElement>();
 
@@ -80,12 +87,17 @@ export class ReturnHeadingsOutlineView extends ItemView {
 	async onOpen() {
 		this.rootEl = this.containerEl.createEl('div', { cls: 'rh-outline' });
 
-		// Register workspace events — cleaned up automatically on close because
-		// we use this.registerEvent() from ItemView's Component base class.
 		this.registerEvent(
 			this.app.workspace.on('active-leaf-change', () => {
-				this.scheduleRefresh();
-				this.reattachScrollListener();
+				// Only update lastMdView when a real markdown leaf becomes active.
+				// Ignore changes that activate the outline pane itself so clicks
+				// don't blank the tree.
+				const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (mdView) {
+					this.lastMdView = mdView;
+					this.scheduleRefresh();
+					this.reattachScrollListener();
+				}
 			}),
 		);
 
@@ -123,18 +135,28 @@ export class ReturnHeadingsOutlineView extends ItemView {
 	/** Rebuilds the entire tree from the active document. */
 	refresh() {
 		if (!this.rootEl) return;
-		this.rootEl.empty();
-		this.lineToEl.clear();
-		this.activeEl = null;
 
-		const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		// Prefer the currently active markdown view; fall back to the last one
+		// we saw so clicks inside the outline don't blank the tree.
+		const mdView =
+			this.app.workspace.getActiveViewOfType(MarkdownView) ?? this.lastMdView;
+
 		if (!mdView) {
+			this.rootEl.empty();
+			this.lineToEl.clear();
+			this.activeEl = null;
 			this.rootEl.createEl('div', {
 				text: 'Open a Markdown file to see its outline.',
 				cls: 'rh-outline-empty',
 			});
 			return;
 		}
+
+		this.lastMdView = mdView;
+
+		this.rootEl.empty();
+		this.lineToEl.clear();
+		this.activeEl = null;
 
 		let content: string;
 		try {
@@ -165,21 +187,17 @@ export class ReturnHeadingsOutlineView extends ItemView {
 		const treeEl = this.rootEl.createEl('div', { cls: 'rh-outline-tree' });
 		this.renderNodes(treeEl, tree, mdView);
 
-		// Update active section immediately after building the tree.
 		this.updateActiveSection(mdView);
 	}
 
 	// ── Private ───────────────────────────────────────────────────────────────
 
-	/**
-	 * Tears down any existing scroll listener and attaches a new one to the
-	 * current active note's scroller(s).
-	 */
 	private reattachScrollListener(): void {
 		this.scrollCleanup?.();
 		this.scrollCleanup = null;
 
-		const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const mdView =
+			this.app.workspace.getActiveViewOfType(MarkdownView) ?? this.lastMdView;
 		if (!mdView) return;
 
 		const doc = mdView.containerEl.ownerDocument;
@@ -193,7 +211,6 @@ export class ReturnHeadingsOutlineView extends ItemView {
 			});
 		};
 
-		// Listen on all possible scroll containers so we work in both modes.
 		const scrollEls = [
 			mdView.containerEl.querySelector<HTMLElement>('.cm-scroller'),
 			mdView.containerEl.querySelector<HTMLElement>('.markdown-preview-view'),
@@ -237,8 +254,8 @@ export class ReturnHeadingsOutlineView extends ItemView {
 	}
 
 	/**
-	 * Scrolls to `targetLine` in the active note, working in both editing and
-	 * reading view modes.
+	 * Scrolls to `targetLine` in the note. Does NOT steal focus from the
+	 * note — just scrolls it, preserving the outline as the active UI element.
 	 */
 	private jumpToLine(mdView: MarkdownView, targetLine: number): void {
 		const mode = mdView.getMode();
@@ -270,14 +287,11 @@ export class ReturnHeadingsOutlineView extends ItemView {
 				{ from: { line: targetLine, ch: 0 }, to: { line: targetLine, ch: 0 } },
 				true,
 			);
-			this.app.workspace.setActiveLeaf(mdView.leaf, { focus: true });
+			// Do NOT call setActiveLeaf here — that would fire active-leaf-change,
+			// which would cause a refresh cycle and could blank the outline.
 		}
 	}
 
-	/**
-	 * Finds the deepest heading context at the current scroll position and
-	 * applies `.rh-outline-active` to its item element.
-	 */
 	private updateActiveSection(mdView: MarkdownView): void {
 		let lineNum: number | null = null;
 		const mode = mdView.getMode();
@@ -306,11 +320,6 @@ export class ReturnHeadingsOutlineView extends ItemView {
 		}
 	}
 
-	/**
-	 * Returns the 0-indexed source line of the last heading above the top of
-	 * the reading view viewport. Uses `metadataCache` to map DOM element to
-	 * line number; strips SNW badges before comparing text.
-	 */
 	private currentLineInPreview(mdView: MarkdownView): number | null {
 		const previewScroller =
 			mdView.containerEl.querySelector<HTMLElement>('.markdown-preview-view');
